@@ -254,7 +254,7 @@ function isTeacher(name) {
 }
 
 function decodeJwtResponse(token) {
-  const base64 = token.split('.')[1].replace(/-/g,'+').replace(/_/,'/');
+  const base64 = token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');  // ← 加 g
   return JSON.parse(decodeURIComponent(
     atob(base64).split('').map(c => '%' + ('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')
   ));
@@ -484,7 +484,7 @@ function useProgressData(userName) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(CONFIG.STORAGE.progress)) continue;
         const rest   = k.slice(CONFIG.STORAGE.progress.length);
-        const sepIdx = rest.indexOf('_');
+        const sepIdx = rest.lastIndexOf('_');   // ← 改用 lastIndexOf
         if (sepIdx < 0) continue;
         const lessonId    = rest.slice(0, sepIdx);
         const studentName = rest.slice(sepIdx + 1);
@@ -1033,19 +1033,34 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   const questionsUnlocked = maxWatchPct >= CONFIG.VIDEO_UNLOCK_THRESHOLD;
   const totalQ  = lesson.questions?.length || 0;
   const answered = Object.keys(answers).length;
-  const allAnswered = totalQ > 0 && answered >= totalQ;
+  // 若無題目，只要觀看達標即可提交
+  const allAnswered = totalQ === 0
+    ? (maxWatchPct >= CONFIG.VIDEO_COMPLETE_THRESHOLD)
+    : (answered >= totalQ);
 
   useEffect(() => {
     if (!hasVideo) return;
     let mounted = true;
+    // 根據已儲存的進度，預估初始已觀看秒數
+    // 這樣回訪學生不用重新累積秒數才能超越舊進度
     watchedSecondsRef.current.clear();
+    // （在 loadYouTubeAPI 的 onReady 回調中補充秒數，見下方）
     loadYouTubeAPI().then(YT => {
       if (!mounted) return;
       playerRef.current = new YT.Player(containerRef.current, {
         videoId: lesson.videoId,
         playerVars: { rel: 0, modestbranding: 1, cc_load_policy: 0, hl: 'zh-TW' },
         events: {
-          onReady:       ()  => { if (mounted) setVideoReady(true); },
+          onReady: () => {
+            if (!mounted) return;
+            setVideoReady(true);
+            // 根據已儲存的 maxWatchPct，預填已看秒數讓後續累積不從零開始
+            const dur = playerRef.current?.getDuration?.() || 0;
+            if (dur > 0 && initialProgress?.watchPct > 0) {
+              const prefilledSeconds = Math.floor((initialProgress.watchPct / 100) * dur);
+              for (let s = 0; s < prefilledSeconds; s++) watchedSecondsRef.current.add(s);
+            }
+          },
           onStateChange: (e) => {
             if (!mounted) return;
             if (e.data === 1) { setIsPlaying(true);  startTracking(YT); }
@@ -1094,7 +1109,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
       startedAt: initialProgress?.startedAt || new Date().toISOString()
     };
     onSaveProgress(lesson.id, prog);
-  }, [maxWatchPct, completedAt]);
+  }, [maxWatchPct, completedAt, answers]);  // ← 加入 answers
 
   async function handleSubmit() {
     if (!allAnswered) { toast('請先回答所有題目', 'warning'); return; }
@@ -1128,7 +1143,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [addToast]);
+  }, [toast]);
 
   return (
     <div className="w-full max-w-2xl landscape:max-w-5xl">
@@ -1209,10 +1224,16 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
             )}
 
             {totalQ === 0 ? (
-              <div className="py-8 text-center text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl">
+               <div className="py-8 text-center text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl">
                 <i className="fas fa-question-circle text-3xl mb-2 opacity-40"></i>
-                <p className="text-sm font-bold">尚未加入題目</p>
-                <p className="text-xs mt-1 text-gray-400">請在 Google Sheet 的 Questions 工作表填入題目</p>
+                <p className="text-sm font-bold">本課題無問答題目</p>
+                <p className="text-xs mt-1 text-gray-400">觀看達 {CONFIG.VIDEO_COMPLETE_THRESHOLD}% 後即可完成課題</p>
+                {!completedAt && allAnswered && (
+                  <button onClick={handleSubmit} disabled={submitLoading}
+                    className="mt-3 px-6 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-bold text-sm shadow hover:scale-[1.02] transition-all">
+                    {submitLoading ? <><i className="fas fa-spinner fa-spin mr-1"></i>儲存中...</> : <><i className="fas fa-paper-plane mr-1"></i>標記為已完成</>}
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -1738,7 +1759,9 @@ function FlippedClassroomApp() {
   }
 
   const toast = useToast();
-  if (error) toast(`進度資料載入錯誤: ${error}`, 'error');
+  useEffect(() => {
+    if (error) toast(`進度資料載入錯誤: ${error}`, 'error');
+  }, [error]);
 
   return (
     <div className={`min-h-screen transition-colors ${isDark ? 'dark bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50/30 to-blue-50'} flex items-start justify-center p-3 md:p-6 pt-4`}>
