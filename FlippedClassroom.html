@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>軒軒翻轉課室</title>
+  <title>軒軒陪你翻轉課室</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -741,6 +741,27 @@ function HomeScreen({
     lessons.filter(l => !!getProgress(l.id)?.completedAt).length,
   [lessons, getProgress]);
 
+  // === 新增：分類與下拉選單狀態 (開始) ===
+  const [openTopics, setOpenTopics] = useState({});
+
+  const toggleTopic = (topic) => {
+    setOpenTopics(prev => ({
+      ...prev,
+      [topic]: !prev[topic]
+    }));
+  };
+
+  const groupedLessons = useMemo(() => {
+    if (!filteredLessons) return {};
+    return filteredLessons.reduce((acc, lesson) => {
+      const topic = (lesson.topic && lesson.topic.trim() !== '') ? lesson.topic : '未分類';
+      if (!acc[topic]) acc[topic] = [];
+      acc[topic].push(lesson);
+      return acc;
+    }, {});
+  }, [filteredLessons]);
+  // === 新增：分類與下拉選單狀態 (結束) ===
+
   return (
     <div className="w-full max-w-lg landscape:max-w-3xl">
       <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
@@ -889,16 +910,42 @@ function HomeScreen({
             )}
           />
         ) : (
-          <div className="space-y-3">
-            {filteredLessons.map(lesson => (
-              <LessonCard
-                key={lesson.id}
-                lesson={lesson}
-                progress={getProgress(lesson.id)}
-                onClick={() => onOpenLesson(lesson)}
-              />
-            ))}
-          </div>
+          <div className="flex flex-col gap-4">
+              {Object.entries(groupedLessons).map(([topic, topicLessons]) => (
+                <div key={topic} className="border border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+                  
+                  {/* 下拉選單標題按鈕 */}
+                  <button
+                    onClick={() => toggleTopic(topic)}
+                    className="w-full flex justify-between items-center p-4 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                        {topic}
+                      </span>
+                      <span className="text-xs py-1 px-3 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 font-bold">
+                        {topicLessons.length} 部影片
+                      </span>
+                    </div>
+                    <i className={`fas fa-chevron-down transition-transform duration-300 ${openTopics[topic] ? 'rotate-180' : ''} text-gray-500 dark:text-gray-400`}></i>
+                  </button>
+
+                  {/* 展開後的影片列表 */}
+                  {openTopics[topic] && (
+                    <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-3 bg-gray-50/50 dark:bg-gray-800/50">
+                      {topicLessons.map(lesson => (
+                        <LessonCard 
+                          key={lesson.id} 
+                          lesson={lesson} 
+                          progress={getProgress(lesson.id)} 
+                          onClick={() => onOpenLesson(lesson)} 
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
         )}
 
         {/* ── 底部按鈕列 ── */}
