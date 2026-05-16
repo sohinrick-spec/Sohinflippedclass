@@ -762,6 +762,29 @@ function HomeScreen({
   }, [filteredLessons]);
   // === 新增：分類與下拉選單狀態 (結束) ===
 
+  // === 新增：將課題按照 1-30，接著 E1-E4 排序 ===
+  const sortedTopicEntries = useMemo(() => {
+    return Object.entries(groupedLessons).sort(([topicA], [topicB]) => {
+      // 確保「未分類」排在最下方
+      if (topicA === '未分類') return 1;
+      if (topicB === '未分類') return -1;
+
+      // 判斷是否為 E 開頭
+      const aIsE = topicA.toUpperCase().startsWith('E');
+      const bIsE = topicB.toUpperCase().startsWith('E');
+
+      // 數字類排前面，E 類排後面
+      if (aIsE && !bIsE) return 1; 
+      if (!aIsE && bIsE) return -1; 
+
+      // 提取並比較數字部分 (例如: 將 "E1" 轉為 1, 或 "1" 轉為 1)
+      const numA = parseInt(topicA.toUpperCase().replace('E', ''), 10) || 0;
+      const numB = parseInt(topicB.toUpperCase().replace('E', ''), 10) || 0;
+      
+      return numA - numB;
+    });
+  }, [groupedLessons]);
+
   return (
     <div className="w-full max-w-lg landscape:max-w-3xl">
       <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
@@ -911,8 +934,8 @@ function HomeScreen({
           />
         ) : (
           <div className="flex flex-col gap-4">
-              {Object.entries(groupedLessons).map(([topic, topicLessons]) => (
-                <div key={topic} className="border border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+              {sortedTopicEntries.map(([topic, topicLessons]) => (
+  <div key={topic} className="border border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
                   
                   {/* 下拉選單標題按鈕 */}
                   <button
