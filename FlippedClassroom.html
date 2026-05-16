@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>軒軒陪你翻轉課室</title>
+  <title>軒軒翻轉課室</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -989,7 +989,8 @@ function HomeScreen({
  * ============================================================================ */
 function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress, onBack }) {
   const toast = useToast();
-
+  // 新增這行：用來記錄學生真正看過的每一秒
+  
   const [watchPct, setWatchPct]         = useState(initialProgress?.watchPct || 0);
   const [maxWatchPct, setMaxWatchPct]   = useState(initialProgress?.watchPct || 0);
   const [answers, setAnswers]           = useState(initialProgress?.answers || {});
@@ -1001,7 +1002,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   const playerRef    = useRef(null);
   const trackTimer   = useRef(null);
   const containerRef = useRef(null);
-
+  const watchedSecondsRef = useRef(new Set());
   const hasVideo     = lesson.videoId &&
                        lesson.videoId !== 'PLACEHOLDER_VIDEO_ID' &&
                        lesson.videoId !== 'YOUTUBE_VIDEO_ID_HERE' &&
@@ -1014,6 +1015,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   useEffect(() => {
     if (!hasVideo) return;
     let mounted = true;
+    watchedSecondsRef.current.clear();
     loadYouTubeAPI().then(YT => {
       if (!mounted) return;
       playerRef.current = new YT.Player(containerRef.current, {
@@ -1039,18 +1041,29 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   }, [lesson.videoId]);
 
   function startTracking(YT) {
-    stopTracking();
-    trackTimer.current = setInterval(() => {
-      const p = playerRef.current;
-      if (!p || typeof p.getCurrentTime !== 'function') return;
-      const cur = p.getCurrentTime();
-      const dur = p.getDuration();
-      if (!dur || dur <= 0) return;
-      const pct = Math.round((cur / dur) * 100);
-      setWatchPct(pct);
-      setMaxWatchPct(prev => Math.max(prev, pct));
-    }, 2000);
-  }
+      if (trackerRef.current) clearInterval(trackerRef.current);
+      trackerRef.current = setInterval(() => {
+        if (!playerRef.current || !playerRef.current.getCurrentTime) return;
+        
+        // 取得當下秒數與總時長
+        const cur  = Math.floor(playerRef.current.getCurrentTime());
+        const dur  = playerRef.current.getDuration();
+        
+        if (dur > 0) {
+          // 👇 核心防禦：將當前秒數存入 Set
+          watchedSecondsRef.current.add(cur);
+          
+          // 👇 真實觀看百分比 = Set 的大小 (不重複秒數) / 總秒數
+          const actualWatchPct = (watchedSecondsRef.current.size / dur) * 100;
+          
+          setWatchPct(prev => {
+            const maxPct = Math.max(prev, actualWatchPct);
+            if (maxPct >= CONFIG.VIDEO_UNLOCK_THRESHOLD) setCanAnswer(true);
+            return maxPct;
+          });
+        }
+      }, 1000);
+    }
 
   function stopTracking() {
     if (trackTimer.current) { clearInterval(trackTimer.current); trackTimer.current = null; }
@@ -1081,6 +1094,22 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   function setAnswer(qId, val) {
     setAnswers(prev => ({ ...prev, [qId]: val }));
   }
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && playerRef.current && playerRef.current.getPlayerState) {
+        if (playerRef.current.getPlayerState() === 1) {
+          playerRef.current.pauseVideo();
+          addToast("影片已暫停！請保持在當前畫面上課喔👀", "warning", 5000);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [addToast]);
 
   return (
     <div className="w-full max-w-2xl landscape:max-w-5xl">
