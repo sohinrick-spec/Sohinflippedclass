@@ -2,6 +2,7 @@
 <html lang="zh-HK">
 <head>
   <meta charset="UTF-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>軒軒翻轉課室</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -18,7 +19,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <!-- YouTube IFrame API — 由 loadYouTubeAPI() 動態載入 -->
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
@@ -74,7 +74,6 @@
       to   { transform:translateY(0);     opacity:1; }
     }
 
-    /* 視頻佔位符樣式 */
     .video-placeholder {
       background: repeating-linear-gradient(
         45deg, #f3f4f6, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px
@@ -86,17 +85,28 @@
       );
     }
 
-    /* 視頻鎖定遮罩 */
     .question-lock-overlay {
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
     }
 
-    /* 進度環動畫 */
     .progress-ring-circle {
       transition: stroke-dashoffset 0.6s ease-in-out;
       transform: rotate(-90deg);
       transform-origin: 50% 50%;
+    }
+
+    /* 課題載入骨架屏 */
+    .lesson-skeleton {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: skeleton-pulse 1.4s ease-in-out infinite;
+      border-radius: 1rem;
+      height: 100px;
+    }
+    .dark .lesson-skeleton {
+      background: linear-gradient(90deg, #1f2937 25%, #374151 50%, #1f2937 75%);
+      background-size: 200% 100%;
     }
   </style>
 </head>
@@ -108,7 +118,7 @@
 /* ============================================================================
  * 【版本檢查系統】
  * ============================================================================ */
-const APP_VERSION       = "2026.05.15.fc.v1";   // ⚠️ 每次發佈要更新
+const APP_VERSION       = "2026.05.15.fc.v2";
 const VERSION_CHECK_URL = "./version.json";
 const VERSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
@@ -158,80 +168,39 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 const CONFIG = {
   APP_NAME:              '軒軒翻轉課室',
   APP_SUBTITLE:          '觀看影片，掌握知識',
-  // ⚠️ 填入實際的 Google Apps Script 網址（用於儲存/讀取學生進度）
-  GOOGLE_SCRIPT_URL:     'https://script.google.com/macros/s/PLACEHOLDER_SCRIPT_ID/exec',
+  // ⚠️ 填入你的 Google Apps Script Web App URL
+  GOOGLE_SCRIPT_URL:     'https://script.google.com/macros/s/AKfycbzusmHGsYA0NQpSwzWYhlGM1pLqpopyNX_Gdhfz_W59Vg-lwkDlH9WOyDrGOujcY-yhuQ/exec',
   // ⚠️ 填入實際的 Google OAuth Client ID
   GOOGLE_CLIENT_ID:      'PLACEHOLDER_CLIENT_ID.apps.googleusercontent.com',
   ALLOWED_EMAIL_DOMAIN:  '@tcss.edu.hk',
-  TEACHER_NAMES:         ['Chi Hin So'],   // ⚠️ 填入老師名稱
-  VIDEO_UNLOCK_THRESHOLD:  80,  // 觀看 % ≥ 此值才解鎖答題（學生需要看到八成影片）
-  VIDEO_COMPLETE_THRESHOLD: 90, // 觀看 % ≥ 此值計算為「完成觀看」
+  TEACHER_NAMES:         ['Chi Hin So'],
+  VIDEO_UNLOCK_THRESHOLD:  80,
+  VIDEO_COMPLETE_THRESHOLD: 90,
   STORAGE: {
     username: 'fc_username',
     darkMode:  'fc_dark_mode',
-    progress:  'fc_progress_'   // prefix + lessonId + '_' + studentName
+    progress:  'fc_progress_'
   }
 };
 
 /* ============================================================================
- * 【區塊 2】課題資料（LESSONS）
+ * 【區塊 2】課題資料已移至 Google Sheet 管理
  * ============================================================================
  *
- * 在此處填入實際課題。每個課題包含：
- *   id          - 唯一識別碼（字符串）
- *   title       - 課題標題
- *   topic       - 所屬主題／章節標籤
- *   description - 課題簡介
- *   videoId     - YouTube 影片 ID（網址中 v= 後的部分）
- *   dueDate     - 截止日期（格式 'YYYY-MM-DD'，可選）
- *   estimatedMin- 預計觀看時間（分鐘）
- *   questions   - 題目陣列（見下方格式說明）
+ * 課題設定位置：Google Sheet → "Lessons" 及 "Questions" 工作表
  *
- * 題目格式：
- *   MCQ:  { type:'mcq',  id:'Q1', text:'題目文字', options:['A','B','C','D'], answer: 0 }
- *         （answer 為正確選項的 index，從 0 開始）
- *   填充: { type:'fill', id:'Q2', text:'題目文字', answer:'參考答案' }
+ * Lessons 工作表欄位：
+ *   id | title | topic | description | videoId | dueDate | estimatedMin
+ *
+ * Questions 工作表欄位：
+ *   lessonId | id | type | text | options | answer
+ *   - MCQ: options 用 | 分隔，e.g. "A|B|C|D"；answer 填 index（0起）
+ *   - fill: options 留空；answer 填參考答案文字
  *
  * ============================================================================ */
-const LESSONS = [
-  /* ────────────────────────────────────────────────────────────
-   * TODO: 在此處填入實際課題。範例結構如下，取消注解後填入資料：
-   * ────────────────────────────────────────────────────────────
-  {
-    id: 'L001',
-    title: '第一課：細胞的基本結構',
-    topic: 'Ch.2 細胞',
-    description: '學習原核細胞與真核細胞的主要差異，以及各種胞器的功能。',
-    videoId: 'YOUTUBE_VIDEO_ID_HERE',   // ← 填入 YouTube 影片 ID
-    dueDate: '2026-06-01',
-    estimatedMin: 15,
-    questions: [
-      // MCQ 範例：
-      { type: 'mcq', id: 'Q1', text: '下列哪種胞器負責合成蛋白質？',
-        options: ['核糖體', '葉綠體', '粒線體', '高基氏體'], answer: 0 },
-      // 填充題範例：
-      { type: 'fill', id: 'Q2', text: '細胞膜的主要成分為___。', answer: '磷脂雙層' }
-    ]
-  },
-  {
-    id: 'L002',
-    title: '第二課：光合作用的光反應',
-    topic: 'Ch.5 光合作用',
-    description: '探討葉綠體的結構，以及光反應中 ATP 和 NADPH 的產生過程。',
-    videoId: 'YOUTUBE_VIDEO_ID_HERE',
-    dueDate: '2026-06-08',
-    estimatedMin: 20,
-    questions: [
-      { type: 'mcq', id: 'Q1', text: '光反應發生的位置是？',
-        options: ['基質', '類囊體膜', '線粒體嵴', '核糖體'], answer: 1 },
-      { type: 'fill', id: 'Q2', text: '光合作用的方程式：6CO₂ + 6H₂O → ___ + 6O₂。', answer: 'C₆H₁₂O₆' }
-    ]
-  }
-  */
-];
 
 /* ============================================================================
- * 【區塊 3】UTILITIES（工具函式）
+ * 【區塊 3】UTILITIES
  * ============================================================================ */
 const {
   useState, useEffect, useMemo, useRef,
@@ -240,7 +209,6 @@ const {
 const MotionLib = window.Motion || { motion: { div: 'div', span: 'span' }, AnimatePresence: ({children}) => children };
 const { motion, AnimatePresence } = MotionLib;
 
-/* ── 日期工具 ── */
 function getHKDateString(dateObj) {
   const base = dateObj || new Date();
   const utc  = base.getTime() + base.getTimezoneOffset() * 60000;
@@ -249,12 +217,6 @@ function getHKDateString(dateObj) {
   const m = String(hk.getMonth() + 1).padStart(2,'0');
   const d = String(hk.getDate()).padStart(2,'0');
   return `${y}-${m}-${d}`;
-}
-
-function formatDateDisplay(dateStr) {
-  if (!dateStr) return '';
-  const [y,m,d] = dateStr.split('-');
-  return `${y}年${parseInt(m)}月${parseInt(d)}日`;
 }
 
 function isDueSoon(dateStr) {
@@ -270,7 +232,6 @@ function isOverdue(dateStr) {
   return getHKDateString() > dateStr;
 }
 
-/* ── 名稱工具 ── */
 function shortenName(fullName) {
   if (!fullName) return '';
   return String(fullName)
@@ -292,7 +253,6 @@ function isTeacher(name) {
   return !!n && TEACHER_NORMALIZED_SET.has(n);
 }
 
-/* ── JWT 解碼 ── */
 function decodeJwtResponse(token) {
   const base64 = token.split('.')[1].replace(/-/g,'+').replace(/_/,'/');
   return JSON.parse(decodeURIComponent(
@@ -300,7 +260,6 @@ function decodeJwtResponse(token) {
   ));
 }
 
-/* ── YouTube IFrame API 載入 ── */
 function loadYouTubeAPI() {
   return new Promise(resolve => {
     if (window.YT && window.YT.Player) { resolve(window.YT); return; }
@@ -317,7 +276,6 @@ function loadYouTubeAPI() {
   });
 }
 
-/* ── 進度百分比格式化 ── */
 function fmtPct(pct) { return `${Math.round(pct || 0)}%`; }
 
 function watchPctColor(pct) {
@@ -332,7 +290,14 @@ function watchPctBg(pct) {
   return 'bg-green-500';
 }
 
-/* ── localStorage 進度存取 ── */
+function isScriptConfigured() {
+  const url = CONFIG.GOOGLE_SCRIPT_URL || '';
+  return url.length > 0 &&
+         !url.includes('YOUR_SCRIPT') &&
+         !url.includes('PLACEHOLDER') &&
+         url.startsWith('https://script.google.com/');
+}
+
 function loadLocalProgress(lessonId, studentName) {
   if (!lessonId || !studentName || studentName === '訪客 (未登入)') return null;
   try {
@@ -351,7 +316,7 @@ function saveLocalProgress(lessonId, studentName, data) {
 }
 
 /* ============================================================================
- * 【區塊 4】TOAST SYSTEM（與原版完全相同）
+ * 【區塊 4】TOAST SYSTEM
  * ============================================================================ */
 const TOAST_STYLE = {
   info:    { bg:'bg-indigo-500', border:'border-indigo-600', icon:'fa-circle-info' },
@@ -439,38 +404,85 @@ function useGoogleSignIn(userName, setUserName) {
 }
 
 /* ============================================================================
- * 【區塊 6】DATA HOOK — 進度資料（雲端 + 本機同步）
- * ============================================================================
- *
- * useProgressData：負責
- *   1. 從 Google Apps Script 讀取所有學生進度（老師用）
- *   2. 將本機進度上傳至雲端
- *
- * ⚠️ 目前雲端 URL 尚未設定，所有操作只存 localStorage。
- *    設定 CONFIG.GOOGLE_SCRIPT_URL 後，補充下方 submitProgress() 即可接通雲端。
+ * 【區塊 6A】useLessons — 從 Google Sheet (GAS) 載入課題資料
+ * ============================================================================ */
+function useLessons() {
+  const [lessons, setLessons]     = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error,   setError]       = useState(null);
+
+  const fetchLessons = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    if (!isScriptConfigured()) {
+      setError('尚未設定 Google Script URL，請在 CONFIG.GOOGLE_SCRIPT_URL 填入 GAS 網址。');
+      setLessons([]);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res  = await fetch(
+        `${CONFIG.GOOGLE_SCRIPT_URL}?action=getLessons&t=${Date.now()}`
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (data.error) throw new Error(data.error);
+      setLessons(Array.isArray(data.lessons) ? data.lessons : []);
+    } catch (e) {
+      setError(`載入課題失敗：${e.message}`);
+      setLessons([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchLessons(); }, [fetchLessons]);
+
+  return { lessons, loading, error, refetchLessons: fetchLessons };
+}
+
+/* ============================================================================
+ * 【區塊 6B】useProgressData — 雲端（GAS）+ 本機 localStorage 雙軌儲存
  * ============================================================================ */
 function useProgressData(userName) {
-  const [allProgress, setAllProgress] = useState(null);   // { [lessonId]: { [studentName]: progressObj } }
+  const [allProgress, setAllProgress] = useState(null);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState(null);
 
-  /* 載入雲端進度（老師用，或自己的進度） */
+  /* ── 從 GAS 或 localStorage 讀取進度 ── */
   const fetchProgress = useCallback(async () => {
     if (!userName || userName === '訪客 (未登入)') return;
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
 
-    // TODO: 接通 Google Apps Script 後，將以下 mock 替換為真實 API 呼叫：
-    // const res  = await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress`);
-    // const data = await res.json();
-    // setAllProgress(data.progress || {});
+    // 優先嘗試 GAS 雲端
+    if (isScriptConfigured()) {
+      try {
+        const res  = await fetch(
+          `${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress&t=${Date.now()}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.progress && !data.error) {
+            setAllProgress(data.progress);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        /* GAS 失敗，降級到 localStorage */
+      }
+    }
 
-    /* 暫時從 localStorage 讀取所有進度 */
+    /* 降級：從 localStorage 讀取 */
     try {
       const result = {};
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(CONFIG.STORAGE.progress)) continue;
-        // key 格式：fc_progress_{lessonId}_{studentName}
         const rest   = k.slice(CONFIG.STORAGE.progress.length);
         const sepIdx = rest.indexOf('_');
         if (sepIdx < 0) continue;
@@ -480,36 +492,50 @@ function useProgressData(userName) {
           const val = JSON.parse(localStorage.getItem(k));
           if (!result[lessonId]) result[lessonId] = {};
           result[lessonId][studentName] = val;
-        } catch { /* ignore corrupt entries */ }
+        } catch { /* 略過損壞項目 */ }
       }
       setAllProgress(result);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      setError(e.message);
+    }
     setLoading(false);
   }, [userName]);
 
-  /* 儲存單次課題進度 */
+  /* ── 儲存進度（先存 localStorage，再上傳 GAS） ── */
   const submitProgress = useCallback(async (lessonId, progressObj) => {
     if (!userName || userName === '訪客 (未登入)') return;
+
+    // 本機快速儲存
     saveLocalProgress(lessonId, userName, progressObj);
 
-    // TODO: 上傳至 Google Apps Script：
-    // await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
-    //   method: 'POST',
-    //   body: JSON.stringify({ action:'saveProgress', lessonId, student: userName, ...progressObj })
-    // });
+    // 上傳至 GAS（非阻塞）
+    if (isScriptConfigured()) {
+      fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' }, // GAS 需要 text/plain 避免 CORS preflight
+        body: JSON.stringify({
+          action:     'saveProgress',
+          lessonId,
+          student:    userName,
+          watchPct:   progressObj.watchPct    || 0,
+          answers:    progressObj.answers     || {},
+          completedAt: progressObj.completedAt || '',
+          startedAt:  progressObj.startedAt   || new Date().toISOString(),
+        })
+      }).catch(() => { /* 靜默失敗，本機已備份 */ });
+    }
 
-    /* 更新本地 allProgress 快照 */
+    // 更新本地快照
     setAllProgress(prev => {
       const next = { ...(prev || {}) };
       if (!next[lessonId]) next[lessonId] = {};
-      next[lessonId][userName] = progressObj;
+      next[lessonId][userName] = { ...progressObj };
       return next;
     });
   }, [userName]);
 
   useEffect(() => { fetchProgress(); }, [fetchProgress]);
 
-  /* 取得某課題某學生的進度 */
   const getProgress = useCallback((lessonId, name = userName) => {
     if (allProgress && allProgress[lessonId] && allProgress[lessonId][name]) {
       return allProgress[lessonId][name];
@@ -521,10 +547,8 @@ function useProgressData(userName) {
 }
 
 /* ============================================================================
- * 【區塊 7】SHARED COMPONENTS（共用元件）
+ * 【區塊 7】SHARED COMPONENTS
  * ============================================================================ */
-
-/* ── 圓形進度環 ── */
 const ProgressRing = memo(function ProgressRing({ pct = 0, size = 48, strokeWidth = 4, label = '', className = '' }) {
   const r   = (size - strokeWidth * 2) / 2;
   const C   = 2 * Math.PI * r;
@@ -534,8 +558,7 @@ const ProgressRing = memo(function ProgressRing({ pct = 0, size = 48, strokeWidt
   return (
     <div className={`relative inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
       <svg width={size} height={size}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none"
-          stroke="#e5e7eb" strokeWidth={strokeWidth} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#e5e7eb" strokeWidth={strokeWidth} />
         <circle cx={size/2} cy={size/2} r={r} fill="none"
           stroke={color} strokeWidth={strokeWidth} strokeLinecap="round"
           strokeDasharray={C} strokeDashoffset={offset}
@@ -548,7 +571,6 @@ const ProgressRing = memo(function ProgressRing({ pct = 0, size = 48, strokeWidt
   );
 });
 
-/* ── 課題狀態徽章 ── */
 function LessonStatusBadge({ status }) {
   const map = {
     not_started: { label:'未開始', cls:'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400', icon:'fa-circle' },
@@ -566,7 +588,6 @@ function LessonStatusBadge({ status }) {
   );
 }
 
-/* ── 課題卡片（學生主頁使用） ── */
 function LessonCard({ lesson, progress, onClick }) {
   const watchPct     = progress?.watchPct     || 0;
   const isCompleted  = !!progress?.completedAt;
@@ -586,14 +607,12 @@ function LessonCard({ lesson, progress, onClick }) {
       onClick={onClick}
       className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden"
     >
-      {/* 左側色條 */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl ${
         isCompleted ? 'bg-green-500' : watchPct > 0 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600'
       }`} />
 
       <div className="pl-3 flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          {/* 主題標籤 */}
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-xs bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">
               {lesson.topic}
@@ -611,17 +630,14 @@ function LessonCard({ lesson, progress, onClick }) {
             )}
           </div>
 
-          {/* 標題 */}
           <h3 className="font-bold text-gray-800 dark:text-gray-100 text-base leading-snug truncate">{lesson.title}</h3>
 
-          {/* 描述 */}
           {lesson.description && (
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{lesson.description}</p>
           )}
 
-          {/* 底部 meta */}
           <div className="mt-2 flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
-            {lesson.estimatedMin && (
+            {lesson.estimatedMin > 0 && (
               <span><i className="fas fa-clock mr-1"></i>{lesson.estimatedMin} 分鐘</span>
             )}
             {totalQ > 0 && (
@@ -638,7 +654,6 @@ function LessonCard({ lesson, progress, onClick }) {
             )}
           </div>
 
-          {/* 影片觀看進度條 */}
           {watchPct > 0 && (
             <div className="mt-2">
               <div className="flex justify-between text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">
@@ -653,7 +668,6 @@ function LessonCard({ lesson, progress, onClick }) {
           )}
         </div>
 
-        {/* 右側進度環 */}
         <div className="flex flex-col items-center gap-1 flex-shrink-0">
           <ProgressRing pct={watchPct} size={52} strokeWidth={5} />
           <span className="text-[9px] text-gray-400 dark:text-gray-500">觀看</span>
@@ -663,7 +677,17 @@ function LessonCard({ lesson, progress, onClick }) {
   );
 }
 
-/* ── 全屏 Loading ── */
+/* 課題載入骨架屏（3 個佔位卡） */
+function LessonSkeletonList() {
+  return (
+    <div className="space-y-3">
+      {[1,2,3].map(i => (
+        <div key={i} className="lesson-skeleton" style={{ opacity: 1 - i * 0.2 }}></div>
+      ))}
+    </div>
+  );
+}
+
 function FullScreenLoader({ text = '載入中...' }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-gray-400 dark:text-gray-500 gap-3">
@@ -673,30 +697,30 @@ function FullScreenLoader({ text = '載入中...' }) {
   );
 }
 
-/* ── 空狀態提示 ── */
-function EmptyState({ icon, title, subtitle }) {
+function EmptyState({ icon, title, subtitle, action }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
       <div className="text-5xl opacity-40">{icon}</div>
       <div className="font-bold text-gray-600 dark:text-gray-300 text-lg">{title}</div>
       {subtitle && <p className="text-sm text-gray-400 dark:text-gray-500 max-w-xs">{subtitle}</p>}
+      {action}
     </div>
   );
 }
 
 /* ============================================================================
- * 【區塊 8】HOME SCREEN（學生主頁）
+ * 【區塊 8】HOME SCREEN
  * ============================================================================ */
 function HomeScreen({
   userName, setUserName, isGuest, setIsGuest,
-  lessons, getProgress, isDark, onOpenLesson,
+  lessons, lessonsLoading, lessonsError, refetchLessons,
+  getProgress, isDark, onOpenLesson,
   onShowTeacherDashboard, onShowStudentStats
 }) {
   const teacher = isTeacher(userName);
   useGoogleSignIn(userName, setUserName);
 
-  /* 過濾選項 */
-  const [filter, setFilter] = useState('all'); // 'all' | 'pending' | 'completed'
+  const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
 
   const filteredLessons = useMemo(() => {
@@ -706,10 +730,7 @@ function HomeScreen({
       list = list.filter(l => l.title.toLowerCase().includes(q) || l.topic.toLowerCase().includes(q));
     }
     if (filter === 'pending') {
-      list = list.filter(l => {
-        const p = getProgress(l.id);
-        return !p?.completedAt;
-      });
+      list = list.filter(l => !getProgress(l.id)?.completedAt);
     } else if (filter === 'completed') {
       list = list.filter(l => !!getProgress(l.id)?.completedAt);
     }
@@ -729,12 +750,18 @@ function HomeScreen({
           <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg flex-shrink-0">
             <i className="fas fa-chalkboard text-white text-2xl"></i>
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100 leading-tight">
               {CONFIG.APP_NAME}
             </h1>
             <p className="text-gray-400 dark:text-gray-500 text-xs">{CONFIG.APP_SUBTITLE}</p>
           </div>
+          {/* 重新整理課題按鈕 */}
+          <button onClick={refetchLessons}
+            className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex-shrink-0"
+            title="重新載入課題">
+            <i className={`fas fa-rotate-right text-xs ${lessonsLoading ? 'fa-spin' : ''}`}></i>
+          </button>
         </div>
 
         {/* ── 身分驗證 ── */}
@@ -803,8 +830,8 @@ function HomeScreen({
           </div>
         )}
 
-        {/* ── 課題篩選列（學生用） ── */}
-        {!teacher && lessons.length > 0 && (
+        {/* ── 課題篩選列 ── */}
+        {!teacher && lessons.length > 0 && !lessonsLoading && (
           <div className="mb-3 flex gap-2 flex-wrap">
             {[
               { id:'all',       label:'全部',   icon:'fa-list' },
@@ -828,15 +855,39 @@ function HomeScreen({
           </div>
         )}
 
-        {/* ── 課題列表 ── */}
-        {lessons.length === 0 ? (
-          <EmptyState
-            icon="📹"
-            title="尚未加入任何課題"
-            subtitle="老師將在 LESSONS 陣列中加入影片課題後，這裡就會顯示課題卡片。"
-          />
+        {/* ── 課題列表區域 ── */}
+        {lessonsLoading ? (
+          /* 載入中：顯示骨架屏 */
+          <div>
+            <p className="text-xs text-center text-gray-400 dark:text-gray-500 mb-3 flex items-center justify-center gap-1.5">
+              <i className="fas fa-spinner fa-spin text-indigo-400"></i>
+              正在從 Google Sheet 載入課題…
+            </p>
+            <LessonSkeletonList />
+          </div>
+        ) : lessonsError ? (
+          /* 載入失敗 */
+          <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-center">
+            <i className="fas fa-circle-exclamation text-2xl text-red-400 mb-2"></i>
+            <p className="text-sm font-bold text-red-600 dark:text-red-400 mb-1">課題載入失敗</p>
+            <p className="text-xs text-red-500 dark:text-red-400 mb-3">{lessonsError}</p>
+            <button onClick={refetchLessons}
+              className="text-xs bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 px-4 py-1.5 rounded-lg hover:bg-red-200 dark:hover:bg-red-900 transition-colors font-bold">
+              <i className="fas fa-rotate-right mr-1"></i>重試
+            </button>
+          </div>
         ) : filteredLessons.length === 0 ? (
-          <EmptyState icon="🔍" title="沒有符合的課題" />
+          <EmptyState
+            icon={search || filter !== 'all' ? '🔍' : '📹'}
+            title={search || filter !== 'all' ? '沒有符合的課題' : '尚無課題'}
+            subtitle={search || filter !== 'all' ? '' : '請在 Google Sheet 的 Lessons 工作表中新增課題。'}
+            action={!search && filter === 'all' && (
+              <button onClick={refetchLessons}
+                className="text-xs bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-4 py-1.5 rounded-lg hover:bg-indigo-200 transition-colors font-bold">
+                <i className="fas fa-rotate-right mr-1"></i>重新載入
+              </button>
+            )}
+          />
         ) : (
           <div className="space-y-3">
             {filteredLessons.map(lesson => (
@@ -852,7 +903,6 @@ function HomeScreen({
 
         {/* ── 底部按鈕列 ── */}
         <div className="mt-5 space-y-2">
-          {/* 學生：個人學習統計 */}
           {userName && !teacher && (
             <button onClick={onShowStudentStats}
               className="w-full py-2.5 px-4 rounded-xl border-2 border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 font-bold text-sm flex items-center justify-center gap-2 transition-all">
@@ -861,7 +911,6 @@ function HomeScreen({
             </button>
           )}
 
-          {/* 老師：教師儀表板 */}
           {teacher && (
             <button onClick={onShowTeacherDashboard}
               className="w-full py-2.5 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg font-bold text-sm flex items-center justify-center gap-2 transition-all">
@@ -881,12 +930,11 @@ function HomeScreen({
 }
 
 /* ============================================================================
- * 【區塊 9】LESSON PLAYER SCREEN（課題播放畫面）
+ * 【區塊 9】LESSON PLAYER SCREEN
  * ============================================================================ */
 function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress, onBack }) {
   const toast = useToast();
 
-  /* ── 狀態 ── */
   const [watchPct, setWatchPct]         = useState(initialProgress?.watchPct || 0);
   const [maxWatchPct, setMaxWatchPct]   = useState(initialProgress?.watchPct || 0);
   const [answers, setAnswers]           = useState(initialProgress?.answers || {});
@@ -898,13 +946,16 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   const playerRef    = useRef(null);
   const trackTimer   = useRef(null);
   const containerRef = useRef(null);
-  const hasVideo     = lesson.videoId && lesson.videoId !== 'PLACEHOLDER_VIDEO_ID' && lesson.videoId.trim() !== '';
+
+  const hasVideo     = lesson.videoId &&
+                       lesson.videoId !== 'PLACEHOLDER_VIDEO_ID' &&
+                       lesson.videoId !== 'YOUTUBE_VIDEO_ID_HERE' &&
+                       String(lesson.videoId).trim() !== '';
   const questionsUnlocked = maxWatchPct >= CONFIG.VIDEO_UNLOCK_THRESHOLD;
   const totalQ  = lesson.questions?.length || 0;
   const answered = Object.keys(answers).length;
   const allAnswered = totalQ > 0 && answered >= totalQ;
 
-  /* ── YouTube 播放器初始化 ── */
   useEffect(() => {
     if (!hasVideo) return;
     let mounted = true;
@@ -942,10 +993,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
       if (!dur || dur <= 0) return;
       const pct = Math.round((cur / dur) * 100);
       setWatchPct(pct);
-      setMaxWatchPct(prev => {
-        const next = Math.max(prev, pct);
-        return next;
-      });
+      setMaxWatchPct(prev => Math.max(prev, pct));
     }, 2000);
   }
 
@@ -953,25 +1001,28 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
     if (trackTimer.current) { clearInterval(trackTimer.current); trackTimer.current = null; }
   }
 
-  /* ── 自動儲存進度（每 10 秒或 watchPct 達關鍵節點） ── */
   useEffect(() => {
-    const prog = { watchPct: maxWatchPct, answers, completedAt, startedAt: initialProgress?.startedAt || new Date().toISOString() };
+    const prog = {
+      watchPct: maxWatchPct, answers, completedAt,
+      startedAt: initialProgress?.startedAt || new Date().toISOString()
+    };
     onSaveProgress(lesson.id, prog);
-  }, [maxWatchPct, completedAt]); // intentionally limited deps
+  }, [maxWatchPct, completedAt]);
 
-  /* ── 提交答案 ── */
   async function handleSubmit() {
     if (!allAnswered) { toast('請先回答所有題目', 'warning'); return; }
     setSubmitLoading(true);
     const now = new Date().toISOString();
-    const prog = { watchPct: maxWatchPct, answers, completedAt: now, startedAt: initialProgress?.startedAt || now };
+    const prog = {
+      watchPct: maxWatchPct, answers, completedAt: now,
+      startedAt: initialProgress?.startedAt || now
+    };
     await onSaveProgress(lesson.id, prog);
     setCompletedAt(now);
     setSubmitLoading(false);
     toast('🎉 課題完成！進度已儲存', 'success', 4000);
   }
 
-  /* ── 更新單題答案 ── */
   function setAnswer(qId, val) {
     setAnswers(prev => ({ ...prev, [qId]: val }));
   }
@@ -980,7 +1031,6 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
     <div className="w-full max-w-2xl landscape:max-w-5xl">
       <div className="glass-panel rounded-2xl shadow-xl overflow-hidden">
 
-        {/* ── 頂欄 ── */}
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30">
           <button onClick={onBack}
             className="w-9 h-9 rounded-full bg-white dark:bg-gray-700 shadow flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex-shrink-0">
@@ -1001,30 +1051,24 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
 
         <div className="overflow-y-auto custom-scrollbar max-h-[calc(92vh-64px)] p-4 md:p-6">
 
-          {/* ═══════════════════════════════════════════════
-           * 【影片區域】
-           * 填入實際課題後，此處將顯示 YouTube 嵌入播放器
-           * ═══════════════════════════════════════════════ */}
+          {/* 影片區域 */}
           <div className="mb-4">
             <div className="relative rounded-xl overflow-hidden shadow-lg bg-black aspect-video">
               {hasVideo ? (
-                /* YouTube 播放器容器 */
                 <div ref={containerRef} className="w-full h-full" />
               ) : (
-                /* 佔位符：尚未填入影片 ID 時顯示 */
                 <div className="video-placeholder absolute inset-0 flex flex-col items-center justify-center gap-3">
                   <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-lg text-center max-w-xs border-2 border-dashed border-gray-300 dark:border-gray-600">
                     <i className="fab fa-youtube text-5xl text-red-500 mb-3"></i>
                     <p className="font-bold text-gray-700 dark:text-gray-200 text-sm">影片尚未設定</p>
                     <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                      請在 <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">LESSONS</code> 陣列中填入 <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">videoId</code>
+                      請在 Google Sheet 的 <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">Lessons</code> 工作表填入 <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">videoId</code>
                     </p>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* 影片觀看進度條 */}
             <div className="mt-2 flex items-center gap-2">
               <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div className={`h-full rounded-full transition-all duration-700 ${watchPctBg(maxWatchPct)}`}
@@ -1036,7 +1080,6 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
               <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">已觀看</span>
             </div>
 
-            {/* 影片解鎖提示 */}
             {!questionsUnlocked && (
               <div className="mt-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-2 flex items-center gap-2">
                 <i className="fas fa-lock"></i>
@@ -1051,12 +1094,8 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
             )}
           </div>
 
-          {/* ═══════════════════════════════════════════════
-           * 【題目區域】
-           * ═══════════════════════════════════════════════ */}
+          {/* 題目區域 */}
           <div className="relative">
-
-            {/* 鎖定遮罩 */}
             {!questionsUnlocked && (
               <div className="question-lock-overlay absolute inset-0 z-10 rounded-xl bg-white/70 dark:bg-gray-900/70 flex flex-col items-center justify-center gap-3">
                 <i className="fas fa-lock text-4xl text-gray-400 dark:text-gray-500"></i>
@@ -1066,12 +1105,11 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
               </div>
             )}
 
-            {/* 題目列表 */}
             {totalQ === 0 ? (
               <div className="py-8 text-center text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl">
                 <i className="fas fa-question-circle text-3xl mb-2 opacity-40"></i>
                 <p className="text-sm font-bold">尚未加入題目</p>
-                <p className="text-xs mt-1 text-gray-400">請在 LESSONS 陣列的 <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">questions</code> 欄位填入題目</p>
+                <p className="text-xs mt-1 text-gray-400">請在 Google Sheet 的 Questions 工作表填入題目</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -1080,12 +1118,6 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
                   課題問題（{answered}/{totalQ} 已作答）
                 </h3>
 
-                {/* ──────────────────────────────────────────────────
-                 * TODO: 以下為題目渲染範例
-                 * 實際課題資料填入後，此處將根據 question.type 渲染：
-                 *   'mcq'  → 選擇題（4 選項按鈕）
-                 *   'fill' → 填充題（文字輸入框）
-                 * ────────────────────────────────────────────────── */}
                 {lesson.questions.map((q, idx) => (
                   <QuestionItem
                     key={q.id}
@@ -1097,7 +1129,6 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
                   />
                 ))}
 
-                {/* 提交按鈕 */}
                 {!completedAt && (
                   <button onClick={handleSubmit}
                     disabled={!allAnswered || submitLoading}
@@ -1143,10 +1174,10 @@ function QuestionItem({ question, index, answer, onAnswer, disabled }) {
         {question.text}
       </p>
 
-      {question.type === 'mcq' && (
+      {question.type === 'mcq' && Array.isArray(question.options) && (
         <div className="grid grid-cols-1 gap-2">
           {question.options.map((opt, oi) => {
-            const selected = answer === String(oi);
+            const selected  = answer === String(oi);
             const isCorrect = disabled && oi === question.answer;
             const isWrong   = disabled && selected && oi !== question.answer;
             return (
@@ -1197,7 +1228,7 @@ function QuestionItem({ question, index, answer, onAnswer, disabled }) {
 }
 
 /* ============================================================================
- * 【區塊 10】STUDENT STATS SCREEN（學生個人學習記錄）
+ * 【區塊 10】STUDENT STATS SCREEN
  * ============================================================================ */
 function StudentStatsScreen({ userName, lessons, getProgress, onBack }) {
   const stats = useMemo(() => {
@@ -1205,9 +1236,9 @@ function StudentStatsScreen({ userName, lessons, getProgress, onBack }) {
       const p = getProgress(l.id);
       return {
         lesson: l,
-        watchPct:   p?.watchPct   || 0,
-        answered:   p?.answers ? Object.keys(p.answers).length : 0,
-        totalQ:     l.questions?.length || 0,
+        watchPct:    p?.watchPct   || 0,
+        answered:    p?.answers ? Object.keys(p.answers).length : 0,
+        totalQ:      l.questions?.length || 0,
         completedAt: p?.completedAt || null,
         startedAt:   p?.startedAt  || null,
       };
@@ -1231,11 +1262,10 @@ function StudentStatsScreen({ userName, lessons, getProgress, onBack }) {
           <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">我的學習記錄</h2>
         </div>
 
-        {/* KPI 卡 */}
         <div className="grid grid-cols-3 gap-3 mb-5">
           {[
-            { icon:'✅', label:'已完成', value: completed,  color:'from-green-500 to-emerald-500' },
-            { icon:'▶️', label:'進行中', value: inProgress, color:'from-blue-500 to-cyan-500' },
+            { icon:'✅', label:'已完成',   value: completed,  color:'from-green-500 to-emerald-500' },
+            { icon:'▶️', label:'進行中',   value: inProgress, color:'from-blue-500 to-cyan-500' },
             { icon:'📊', label:'平均觀看', value: `${avgWatch}%`, color:'from-indigo-500 to-purple-500' },
           ].map((k,i) => (
             <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3 text-center">
@@ -1246,7 +1276,6 @@ function StudentStatsScreen({ userName, lessons, getProgress, onBack }) {
           ))}
         </div>
 
-        {/* 課題明細 */}
         <div className="space-y-2">
           {stats.map(s => (
             <div key={s.lesson.id}
@@ -1279,10 +1308,9 @@ function StudentStatsScreen({ userName, lessons, getProgress, onBack }) {
 }
 
 /* ============================================================================
- * 【區塊 11】TEACHER DASHBOARD SCREEN（教師儀表板）
+ * 【區塊 11】TEACHER DASHBOARD SCREEN
  * ============================================================================ */
 function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonReport, onRefresh, loading }) {
-  /* 計算每課題的統計 */
   const lessonStats = useMemo(() => {
     return lessons.map(lesson => {
       const progressMap = allProgress?.[lesson.id] || {};
@@ -1296,7 +1324,7 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
     });
   }, [lessons, allProgress]);
 
-  const totalStudents   = useMemo(() => {
+  const totalStudents = useMemo(() => {
     const names = new Set();
     Object.values(allProgress || {}).forEach(lp =>
       Object.keys(lp).forEach(n => names.add(n))
@@ -1304,13 +1332,12 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
     return names.size;
   }, [allProgress]);
 
-  const totalCompleted  = lessonStats.reduce((a,s) => a + s.completed, 0);
+  const totalCompleted = lessonStats.reduce((a,s) => a + s.completed, 0);
 
   return (
     <div className="w-full max-w-3xl">
       <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
 
-        {/* ── 標頭 ── */}
         <div className="flex items-center gap-3 mb-5">
           <button onClick={onBack}
             className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
@@ -1329,12 +1356,11 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
           </button>
         </div>
 
-        {/* ── KPI 列 ── */}
         <div className="grid grid-cols-3 gap-3 mb-5">
           {[
-            { icon:'📹', label:'課題總數',     value: lessons.length,  color:'from-indigo-500 to-purple-500' },
-            { icon:'👥', label:'參與學生',     value: totalStudents,   color:'from-blue-500 to-cyan-500' },
-            { icon:'✅', label:'完成人次',     value: totalCompleted,  color:'from-green-500 to-emerald-500' },
+            { icon:'📹', label:'課題總數', value: lessons.length,  color:'from-indigo-500 to-purple-500' },
+            { icon:'👥', label:'參與學生', value: totalStudents,   color:'from-blue-500 to-cyan-500' },
+            { icon:'✅', label:'完成人次', value: totalCompleted,  color:'from-green-500 to-emerald-500' },
           ].map((k,i) => (
             <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3 text-center">
               <div className="text-xl mb-1">{k.icon}</div>
@@ -1344,9 +1370,8 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
           ))}
         </div>
 
-        {/* ── 課題列表 ── */}
         {lessons.length === 0 ? (
-          <EmptyState icon="📹" title="尚未設定任何課題" subtitle="在 LESSONS 陣列中填入課題後，這裡將顯示班級進度。" />
+          <EmptyState icon="📹" title="尚未設定任何課題" subtitle="請在 Google Sheet 的 Lessons 工作表中新增課題。" />
         ) : (
           <div className="space-y-3">
             <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
@@ -1374,7 +1399,6 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
                     </div>
                     <p className="font-bold text-gray-800 dark:text-gray-100 truncate">{s.lesson.title}</p>
 
-                    {/* 完成率進度條 */}
                     <div className="mt-2 flex items-center gap-2">
                       <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                         {s.started > 0 && (
@@ -1387,11 +1411,10 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
                       </span>
                     </div>
 
-                    {/* 平均觀看 */}
                     {s.started > 0 && (
                       <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                         平均觀看 <span className={`font-bold ${watchPctColor(s.avgWatch)}`}>{fmtPct(s.avgWatch)}</span>
-                        ·  {s.started} 人已開始
+                        · {s.started} 人已開始
                       </div>
                     )}
                   </div>
@@ -1407,20 +1430,18 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
 }
 
 /* ============================================================================
- * 【區塊 12】TEACHER LESSON REPORT SCREEN（教師 - 單課題詳細報告）
+ * 【區塊 12】TEACHER LESSON REPORT SCREEN
  * ============================================================================ */
 function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
   const [expandedStudent, setExpandedStudent] = useState(null);
 
-  const progressMap  = allProgress?.[lesson.id] || {};
-  const studentList  = Object.entries(progressMap)
+  const progressMap = allProgress?.[lesson.id] || {};
+  const studentList = Object.entries(progressMap)
     .map(([name, p]) => ({ name, ...p }))
     .sort((a,b) => (b.watchPct||0) - (a.watchPct||0));
 
-  const totalQ      = lesson.questions?.length || 0;
-  const qIds        = lesson.questions?.map(q => q.id) || [];
-
-  const avgWatch    = studentList.length > 0
+  const totalQ     = lesson.questions?.length || 0;
+  const avgWatch   = studentList.length > 0
     ? Math.round(studentList.reduce((a,s) => a + (s.watchPct||0), 0) / studentList.length)
     : 0;
   const completedCount = studentList.filter(s => s.completedAt).length;
@@ -1429,7 +1450,6 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
     <div className="w-full max-w-4xl">
       <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
 
-        {/* ── 標頭 ── */}
         <div className="flex items-center gap-3 mb-5">
           <button onClick={onBack}
             className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
@@ -1441,7 +1461,6 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
           </div>
         </div>
 
-        {/* ── KPI ── */}
         <div className="grid grid-cols-4 gap-2 mb-5">
           {[
             { icon:'👥', label:'已開始',   value: studentList.length, color:'from-blue-500 to-cyan-500' },
@@ -1457,7 +1476,6 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
           ))}
         </div>
 
-        {/* ── 學生進度列表 ── */}
         {studentList.length === 0 ? (
           <EmptyState icon="👥" title="尚無學生開始此課題" subtitle="學生完成觀看後，這裡將顯示詳細的進度報告。" />
         ) : (
@@ -1466,7 +1484,6 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
               <i className="fas fa-users text-indigo-500"></i>學生進度（按觀看%排序）
             </h3>
 
-            {/* 表格標頭 */}
             <div className="grid text-xs font-bold text-gray-400 dark:text-gray-500 px-4 py-2"
                  style={{ gridTemplateColumns: '1fr 120px 80px 80px 40px' }}>
               <span>學生</span>
@@ -1477,20 +1494,17 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
             </div>
 
             {studentList.map(s => {
-              const answered    = s.answers ? Object.keys(s.answers).length : 0;
-              const isExpanded  = expandedStudent === s.name;
+              const answered   = s.answers ? Object.keys(s.answers).length : 0;
+              const isExpanded = expandedStudent === s.name;
               return (
                 <div key={s.name} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden transition-all">
-                  {/* 主行 */}
                   <div className="grid items-center px-4 py-3 gap-2"
                        style={{ gridTemplateColumns: '1fr 120px 80px 80px 40px' }}>
-                    {/* 學生名 */}
                     <div className="font-medium text-gray-700 dark:text-gray-200 text-sm truncate flex items-center gap-2">
                       <i className="fas fa-user-circle text-gray-300 dark:text-gray-600"></i>
                       {shortenName(s.name)}
                     </div>
 
-                    {/* 觀看進度條 */}
                     <div className="flex items-center gap-1.5">
                       <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-700 ${watchPctBg(s.watchPct)}`}
@@ -1501,7 +1515,6 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
                       </span>
                     </div>
 
-                    {/* 答題 */}
                     <div className="text-center text-sm">
                       {totalQ > 0
                         ? <span className={answered >= totalQ ? 'text-green-500 dark:text-green-400 font-bold' : 'text-gray-500 dark:text-gray-400'}>
@@ -1511,7 +1524,6 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
                       }
                     </div>
 
-                    {/* 狀態 */}
                     <div className="flex justify-center">
                       <LessonStatusBadge status={
                         s.completedAt ? 'completed'
@@ -1521,19 +1533,17 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
                       } />
                     </div>
 
-                    {/* 展開按鈕 */}
                     <button onClick={() => setExpandedStudent(isExpanded ? null : s.name)}
                       className="flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
                       <i className={`fas fa-chevron-${isExpanded ? 'up' : 'down'} text-xs`}></i>
                     </button>
                   </div>
 
-                  {/* 展開：顯示各題答案 */}
                   {isExpanded && totalQ > 0 && (
                     <div className="px-4 pb-3 pt-0 border-t border-gray-50 dark:border-gray-700/50">
                       <div className="mt-2 space-y-1.5">
                         {lesson.questions.map((q, qi) => {
-                          const ans = s.answers?.[q.id];
+                          const ans     = s.answers?.[q.id];
                           const correct = q.type === 'mcq'
                             ? ans === String(q.answer)
                             : ans?.toLowerCase().trim() === q.answer?.toLowerCase().trim();
@@ -1578,32 +1588,28 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
 }
 
 /* ============================================================================
- * 【區塊 13】MAIN APP（主應用）
+ * 【區塊 13】MAIN APP
  * ============================================================================ */
 function FlippedClassroomApp() {
-  /* ── 持久化狀態 ── */
   const [userName, setUserName] = useState(() => localStorage.getItem(CONFIG.STORAGE.username) || '');
   const [isGuest, setIsGuest]   = useState(false);
   const [isDark, setIsDark]     = useState(() => localStorage.getItem(CONFIG.STORAGE.darkMode) === 'true');
 
-  /* ── 頁面狀態機 ── */
   const [screen, setScreen] = useState('home');
-  // 'home' | 'lesson' | 'student_stats' | 'teacher_dashboard' | 'teacher_lesson_report'
-
-  /* ── 選中的課題（用於 lesson / teacher_lesson_report） ── */
   const [activelesson, setActiveLesson] = useState(null);
+
+  /* ── ★ 課題資料從 GAS 動態載入 ── */
+  const { lessons, loading: lessonsLoading, error: lessonsError, refetchLessons } = useLessons();
 
   /* ── 進度資料 ── */
   const { allProgress, loading, error, submitProgress, getProgress, refetch } =
     useProgressData(userName);
 
-  /* ── 深色模式同步 ── */
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
     localStorage.setItem(CONFIG.STORAGE.darkMode, isDark);
   }, [isDark]);
 
-  /* ── 登出清理 ── */
   useEffect(() => {
     if (!userName) {
       localStorage.removeItem(CONFIG.STORAGE.username);
@@ -1614,19 +1620,16 @@ function FlippedClassroomApp() {
     }
   }, [userName]);
 
-  /* ── 頁面切換時更新 window.__APP_STATE__ ── */
   useEffect(() => {
     window.__APP_STATE__ = { gameState: screen };
     window.dispatchEvent(new Event('app-state-changed'));
   }, [screen]);
 
-  /* ── 進入課題 ── */
   function handleOpenLesson(lesson) {
     setActiveLesson(lesson);
     setScreen('lesson');
   }
 
-  /* ── 儲存課題進度 ── */
   async function handleSaveProgress(lessonId, progressObj) {
     await submitProgress(lessonId, progressObj);
   }
@@ -1637,22 +1640,23 @@ function FlippedClassroomApp() {
   return (
     <div className={`min-h-screen transition-colors ${isDark ? 'dark bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50/30 to-blue-50'} flex items-start justify-center p-3 md:p-6 pt-4`}>
 
-      {/* ── 深色模式切換按鈕（固定右上角） ── */}
       <button onClick={() => setIsDark(d => !d)}
         className="fixed top-4 right-4 z-[999] w-10 h-10 rounded-full bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-yellow-400 flex items-center justify-center transition-all hover:scale-110">
         {isDark ? <i className="fas fa-sun text-lg"></i> : <i className="fas fa-moon text-lg"></i>}
       </button>
 
-      {/* ── 主畫面 ── */}
       <AnimatePresence mode="wait">
 
         {screen === 'home' && (
           <motion.div key="home" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-20}}
             className="w-full flex justify-center">
             <HomeScreen
-              userName={userName} setUserName={setUserName}
-              isGuest={isGuest}   setIsGuest={setIsGuest}
-              lessons={LESSONS}
+              userName={userName}       setUserName={setUserName}
+              isGuest={isGuest}         setIsGuest={setIsGuest}
+              lessons={lessons}
+              lessonsLoading={lessonsLoading}
+              lessonsError={lessonsError}
+              refetchLessons={refetchLessons}
               getProgress={(lid) => getProgress(lid)}
               isDark={isDark}
               onOpenLesson={handleOpenLesson}
@@ -1680,7 +1684,7 @@ function FlippedClassroomApp() {
             className="w-full flex justify-center">
             <StudentStatsScreen
               userName={userName}
-              lessons={LESSONS}
+              lessons={lessons}
               getProgress={(lid) => getProgress(lid)}
               onBack={() => setScreen('home')}
             />
@@ -1692,7 +1696,7 @@ function FlippedClassroomApp() {
             className="w-full flex justify-center">
             {isTeacher(userName) ? (
               <TeacherDashboardScreen
-                lessons={LESSONS}
+                lessons={lessons}
                 allProgress={allProgress}
                 loading={loading}
                 onBack={() => setScreen('home')}
@@ -1716,18 +1720,18 @@ function FlippedClassroomApp() {
         {screen === 'teacher_lesson_report' && activelesson && (
           <motion.div key="treport" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
             className="w-full flex justify-center">
-          {isTeacher(userName) ? (
-            <TeacherLessonReportScreen
-              lesson={activelesson}
-              allProgress={allProgress}
-              onBack={() => setScreen('teacher_dashboard')}
-            />
-          ) : (
-            <div className="glass-panel p-8 rounded-2xl shadow-xl text-center max-w-sm">
-              <i className="fas fa-lock text-4xl text-red-500 mb-4"></i>
-              <button onClick={() => setScreen('home')} className="bg-gray-600 text-white px-6 py-2 rounded-lg">返回</button>
-            </div>
-          )}
+            {isTeacher(userName) ? (
+              <TeacherLessonReportScreen
+                lesson={activelesson}
+                allProgress={allProgress}
+                onBack={() => setScreen('teacher_dashboard')}
+              />
+            ) : (
+              <div className="glass-panel p-8 rounded-2xl shadow-xl text-center max-w-sm">
+                <i className="fas fa-lock text-4xl text-red-500 mb-4"></i>
+                <button onClick={() => setScreen('home')} className="bg-gray-600 text-white px-6 py-2 rounded-lg">返回</button>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -1737,7 +1741,7 @@ function FlippedClassroomApp() {
 }
 
 /* ============================================================================
- * 【區塊 14】ROOT RENDER
+ * 【區塊 14】ROOT RENDER 
  * ============================================================================ */
 function Root() {
   return (
