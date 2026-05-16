@@ -714,7 +714,7 @@ function EmptyState({ icon, title, subtitle, action }) {
 function HomeScreen({
   userName, setUserName, isGuest, setIsGuest,
   lessons, lessonsLoading, lessonsError, refetchLessons,
-  getProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin // 👈 新增 onOpenAdmin
+  getProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin, onShowStudentStats
 }) {
   
   const teacher = isTeacher(userName);
@@ -1064,8 +1064,8 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   }, [lesson.videoId]);
 
   function startTracking(YT) {
-      if (trackerRef.current) clearInterval(trackerRef.current);
-      trackerRef.current = setInterval(() => {
+      if (trackTimer.current) clearInterval(trackTimer.current);
+      trackTimer.current = setInterval(() => {
         if (!playerRef.current || !playerRef.current.getCurrentTime) return;
         
         // 取得當下秒數與總時長
@@ -1079,11 +1079,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
           // 👇 真實觀看百分比 = Set 的大小 (不重複秒數) / 總秒數
           const actualWatchPct = (watchedSecondsRef.current.size / dur) * 100;
           
-          setWatchPct(prev => {
-            const maxPct = Math.max(prev, actualWatchPct);
-            if (maxPct >= CONFIG.VIDEO_UNLOCK_THRESHOLD) setCanAnswer(true);
-            return maxPct;
-          });
+          setMaxWatchPct(prev => Math.max(prev, actualWatchPct));
         }
       }, 1000);
     }
@@ -1123,7 +1119,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
       if (document.hidden && playerRef.current && playerRef.current.getPlayerState) {
         if (playerRef.current.getPlayerState() === 1) {
           playerRef.current.pauseVideo();
-          addToast("影片已暫停！請保持在當前畫面上課喔👀", "warning", 5000);
+          toast("影片已暫停！請保持在當前畫面上課喔👀", "warning", 5000);
         }
       }
     };
@@ -1764,7 +1760,8 @@ function FlippedClassroomApp() {
                 refetchLessons={refetchLessons} getProgress={getProgress}
                 isDark={isDark} onOpenLesson={handleOpenLesson}
                 onOpenTeacher={() => setScreen('teacher_dashboard')}
-                onOpenAdmin={() => setScreen('assignment_admin')} /* 👈 新增這行 */
+                onOpenAdmin={() => setScreen('assignment_admin')}
+                onShowStudentStats={() => setScreen('student_stats')}
               />
           </motion.div>
         )}
@@ -1841,22 +1838,19 @@ function FlippedClassroomApp() {
         {screen === 'assignment_admin' && (
           <motion.div key="aadmin" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
             className="w-full flex justify-center">
-            <AssignmentAdminScreen 
-      userName={userName} 
-      onBack={() => setScreen('home')} 
-      refetchLessons={refetchLessons} 
-      lessons={lessons} 
-      allProgress={allProgress} 
-    />
             {isTeacher(userName) ? (
               <AssignmentAdminScreen
                 userName={userName}
                 onBack={() => setScreen('home')}
                 refetchLessons={refetchLessons}
+                lessons={lessons}
+                allProgress={allProgress}
               />
             ) : (
               <div className="glass-panel p-8 rounded-2xl shadow-xl text-center max-w-sm">
                 <i className="fas fa-lock text-4xl text-red-500 mb-4"></i>
+                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">權限不足</h2>
+                <p className="text-gray-500 dark:text-gray-400 mb-4 text-sm">此頁面僅限教師使用。</p>
                 <button onClick={() => setScreen('home')} className="bg-gray-600 text-white px-6 py-2 rounded-lg">返回</button>
               </div>
             )}
