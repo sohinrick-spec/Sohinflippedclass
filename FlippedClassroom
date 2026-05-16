@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>軒軒翻轉課室</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class', future: { hoverOnlyWhenSupported: true } }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- YouTube IFrame API — 由 loadYouTubeAPI() 動態載入 -->
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+    body { font-family: 'Noto Sans TC', sans-serif; }
+
+    .glass-panel {
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .dark body { background-color: #111827; color: #f3f4f6; }
+    .dark .glass-panel {
+      background: rgba(31,41,55,0.95);
+      border: 1px solid rgba(75,85,99,0.5);
+    }
+
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #c7c7c7; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+    .dark .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+    .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; }
+    .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+    body.logged-in #credential_picker_container,
+    body.logged-in iframe[src*="accounts.google.com"] {
+      display: none !important; visibility: hidden !important;
+      pointer-events: none !important; opacity: 0 !important;
+    }
+
+    @keyframes skeleton-pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+    .skeleton-pulse { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+
+    @keyframes progress-shine {
+      0%  { background-position: -200% 0; }
+      100%{ background-position:  200% 0; }
+    }
+    .progress-shine {
+      background: linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.4) 50%,rgba(255,255,255,0) 100%);
+      background-size: 200% 100%;
+      animation: progress-shine 2s linear infinite;
+    }
+
+    @keyframes bubble-pop {
+      0%  { transform:scale(0); opacity:0; }
+      60% { transform:scale(1.3); opacity:1; }
+      100%{ transform:scale(1);   opacity:1; }
+    }
+    .bubble-pop { animation: bubble-pop 0.4s ease-out; }
+
+    @keyframes slideDownBanner {
+      from { transform:translateY(-100%); opacity:0; }
+      to   { transform:translateY(0);     opacity:1; }
+    }
+
+    /* 視頻佔位符樣式 */
+    .video-placeholder {
+      background: repeating-linear-gradient(
+        45deg, #f3f4f6, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px
+      );
+    }
+    .dark .video-placeholder {
+      background: repeating-linear-gradient(
+        45deg, #1f2937, #1f2937 10px, #374151 10px, #374151 20px
+      );
+    }
+
+    /* 視頻鎖定遮罩 */
+    .question-lock-overlay {
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    /* 進度環動畫 */
+    .progress-ring-circle {
+      transition: stroke-dashoffset 0.6s ease-in-out;
+      transform: rotate(-90deg);
+      transform-origin: 50% 50%;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react,env">
+
+/* ============================================================================
+ * 【版本檢查系統】
+ * ============================================================================ */
+const APP_VERSION       = "2026.05.15.fc.v1";   // ⚠️ 每次發佈要更新
+const VERSION_CHECK_URL = "./version.json";
+const VERSION_CHECK_INTERVAL = 5 * 60 * 1000;
+
+window.__APP_STATE__ = { gameState: 'home' };
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`${VERSION_CHECK_URL}?t=${Date.now()}`, { cache:'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.version && data.version !== APP_VERSION) showUpdatePrompt(data.version, data.releaseNote);
+  } catch(e) { /* silent */ }
+}
+
+function showUpdatePrompt(newVersion, releaseNote) {
+  if (document.getElementById('app-update-banner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'app-update-banner';
+  banner.style.cssText = `
+    position:fixed;top:0;left:0;right:0;z-index:99999;
+    background:linear-gradient(90deg,#6366f1,#a855f7);
+    color:white;padding:12px 16px;
+    font-family:'Noto Sans TC',sans-serif;font-size:14px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.25);
+    display:flex;align-items:center;justify-content:center;
+    gap:12px;flex-wrap:wrap;animation:slideDownBanner 0.4s ease-out;
+  `;
+  banner.innerHTML = `
+    <span style="font-weight:600;">🎉 發現新版本 (${newVersion})！${releaseNote ? '📝 '+releaseNote : ''}</span>
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <button id="fc-update-btn" style="background:white;color:#6366f1;border:none;padding:6px 16px;border-radius:6px;font-weight:bold;cursor:pointer;">立即更新</button>
+      <button id="fc-update-later" style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.6);padding:6px 12px;border-radius:6px;cursor:pointer;">關閉</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+  document.getElementById('fc-update-btn').onclick    = () => location.reload(true);
+  document.getElementById('fc-update-later').onclick = () => banner.remove();
+}
+
+setTimeout(checkForUpdate, 30000);
+setInterval(checkForUpdate, VERSION_CHECK_INTERVAL);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+
+/* ============================================================================
+ * 【區塊 1】CONFIG
+ * ============================================================================ */
+const CONFIG = {
+  APP_NAME:              '軒軒翻轉課室',
+  APP_SUBTITLE:          '觀看影片，掌握知識',
+  // ⚠️ 填入實際的 Google Apps Script 網址（用於儲存/讀取學生進度）
+  GOOGLE_SCRIPT_URL:     'https://script.google.com/macros/s/PLACEHOLDER_SCRIPT_ID/exec',
+  // ⚠️ 填入實際的 Google OAuth Client ID
+  GOOGLE_CLIENT_ID:      'PLACEHOLDER_CLIENT_ID.apps.googleusercontent.com',
+  ALLOWED_EMAIL_DOMAIN:  '@tcss.edu.hk',
+  TEACHER_NAMES:         ['Chi Hin So'],   // ⚠️ 填入老師名稱
+  VIDEO_UNLOCK_THRESHOLD:  80,  // 觀看 % ≥ 此值才解鎖答題（學生需要看到八成影片）
+  VIDEO_COMPLETE_THRESHOLD: 90, // 觀看 % ≥ 此值計算為「完成觀看」
+  STORAGE: {
+    username: 'fc_username',
+    darkMode:  'fc_dark_mode',
+    progress:  'fc_progress_'   // prefix + lessonId + '_' + studentName
+  }
+};
+
+/* ============================================================================
+ * 【區塊 2】課題資料（LESSONS）
+ * ============================================================================
+ *
+ * 在此處填入實際課題。每個課題包含：
+ *   id          - 唯一識別碼（字符串）
+ *   title       - 課題標題
+ *   topic       - 所屬主題／章節標籤
+ *   description - 課題簡介
+ *   videoId     - YouTube 影片 ID（網址中 v= 後的部分）
+ *   dueDate     - 截止日期（格式 'YYYY-MM-DD'，可選）
+ *   estimatedMin- 預計觀看時間（分鐘）
+ *   questions   - 題目陣列（見下方格式說明）
+ *
+ * 題目格式：
+ *   MCQ:  { type:'mcq',  id:'Q1', text:'題目文字', options:['A','B','C','D'], answer: 0 }
+ *         （answer 為正確選項的 index，從 0 開始）
+ *   填充: { type:'fill', id:'Q2', text:'題目文字', answer:'參考答案' }
+ *
+ * ============================================================================ */
+const LESSONS = [
+  /* ────────────────────────────────────────────────────────────
+   * TODO: 在此處填入實際課題。範例結構如下，取消注解後填入資料：
+   * ────────────────────────────────────────────────────────────
+  {
+    id: 'L001',
+    title: '第一課：細胞的基本結構',
+    topic: 'Ch.2 細胞',
+    description: '學習原核細胞與真核細胞的主要差異，以及各種胞器的功能。',
+    videoId: 'YOUTUBE_VIDEO_ID_HERE',   // ← 填入 YouTube 影片 ID
+    dueDate: '2026-06-01',
+    estimatedMin: 15,
+    questions: [
+      // MCQ 範例：
+      { type: 'mcq', id: 'Q1', text: '下列哪種胞器負責合成蛋白質？',
+        options: ['核糖體', '葉綠體', '粒線體', '高基氏體'], answer: 0 },
+      // 填充題範例：
+      { type: 'fill', id: 'Q2', text: '細胞膜的主要成分為___。', answer: '磷脂雙層' }
+    ]
+  },
+  {
+    id: 'L002',
+    title: '第二課：光合作用的光反應',
+    topic: 'Ch.5 光合作用',
+    description: '探討葉綠體的結構，以及光反應中 ATP 和 NADPH 的產生過程。',
+    videoId: 'YOUTUBE_VIDEO_ID_HERE',
+    dueDate: '2026-06-08',
+    estimatedMin: 20,
+    questions: [
+      { type: 'mcq', id: 'Q1', text: '光反應發生的位置是？',
+        options: ['基質', '類囊體膜', '線粒體嵴', '核糖體'], answer: 1 },
+      { type: 'fill', id: 'Q2', text: '光合作用的方程式：6CO₂ + 6H₂O → ___ + 6O₂。', answer: 'C₆H₁₂O₆' }
+    ]
+  }
+  */
+];
+
+/* ============================================================================
+ * 【區塊 3】UTILITIES（工具函式）
+ * ============================================================================ */
+const {
+  useState, useEffect, useMemo, useRef,
+  useCallback, useContext, createContext, memo
+} = React;
+const MotionLib = window.Motion || { motion: { div: 'div', span: 'span' }, AnimatePresence: ({children}) => children };
+const { motion, AnimatePresence } = MotionLib;
+
+/* ── 日期工具 ── */
+function getHKDateString(dateObj) {
+  const base = dateObj || new Date();
+  const utc  = base.getTime() + base.getTimezoneOffset() * 60000;
+  const hk   = new Date(utc + 3600000 * 8);
+  const y = hk.getFullYear();
+  const m = String(hk.getMonth() + 1).padStart(2,'0');
+  const d = String(hk.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return '';
+  const [y,m,d] = dateStr.split('-');
+  return `${y}年${parseInt(m)}月${parseInt(d)}日`;
+}
+
+function isDueSoon(dateStr) {
+  if (!dateStr) return false;
+  const today = new Date(getHKDateString());
+  const due   = new Date(dateStr);
+  const diff  = Math.round((due - today) / (1000 * 60 * 60 * 24));
+  return diff >= 0 && diff <= 3;
+}
+
+function isOverdue(dateStr) {
+  if (!dateStr) return false;
+  return getHKDateString() > dateStr;
+}
+
+/* ── 名稱工具 ── */
+function shortenName(fullName) {
+  if (!fullName) return '';
+  return String(fullName)
+    .replace(/^\s*[4-6][A-Z]\d+\s*/i, '')
+    .replace(/\s*\([\d\-]+\)(\s*[A-Za-z0-9]+)?\s*$/, '')
+    .trim();
+}
+
+function normalizeNameForMatch(name) {
+  if (!name) return '';
+  return shortenName(name).toLowerCase().trim().split(/\s+/).filter(Boolean).sort().join(' ');
+}
+
+const TEACHER_NORMALIZED_SET = new Set(CONFIG.TEACHER_NAMES.map(normalizeNameForMatch));
+
+function isTeacher(name) {
+  if (!name || name === '訪客 (未登入)') return false;
+  const n = normalizeNameForMatch(name);
+  return !!n && TEACHER_NORMALIZED_SET.has(n);
+}
+
+/* ── JWT 解碼 ── */
+function decodeJwtResponse(token) {
+  const base64 = token.split('.')[1].replace(/-/g,'+').replace(/_/,'/');
+  return JSON.parse(decodeURIComponent(
+    atob(base64).split('').map(c => '%' + ('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')
+  ));
+}
+
+/* ── YouTube IFrame API 載入 ── */
+function loadYouTubeAPI() {
+  return new Promise(resolve => {
+    if (window.YT && window.YT.Player) { resolve(window.YT); return; }
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      if (prev) prev();
+      resolve(window.YT);
+    };
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(s);
+    }
+  });
+}
+
+/* ── 進度百分比格式化 ── */
+function fmtPct(pct) { return `${Math.round(pct || 0)}%`; }
+
+function watchPctColor(pct) {
+  if (!pct || pct < 30)  return 'text-red-500 dark:text-red-400';
+  if (pct < CONFIG.VIDEO_COMPLETE_THRESHOLD) return 'text-yellow-500 dark:text-yellow-400';
+  return 'text-green-500 dark:text-green-400';
+}
+
+function watchPctBg(pct) {
+  if (!pct || pct < 30)  return 'bg-red-500';
+  if (pct < CONFIG.VIDEO_COMPLETE_THRESHOLD) return 'bg-yellow-500';
+  return 'bg-green-500';
+}
+
+/* ── localStorage 進度存取 ── */
+function loadLocalProgress(lessonId, studentName) {
+  if (!lessonId || !studentName || studentName === '訪客 (未登入)') return null;
+  try {
+    const key = CONFIG.STORAGE.progress + lessonId + '_' + studentName;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveLocalProgress(lessonId, studentName, data) {
+  if (!lessonId || !studentName || studentName === '訪客 (未登入)') return;
+  try {
+    const key = CONFIG.STORAGE.progress + lessonId + '_' + studentName;
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+  } catch { /* ignore quota errors */ }
+}
+
+/* ============================================================================
+ * 【區塊 4】TOAST SYSTEM（與原版完全相同）
+ * ============================================================================ */
+const TOAST_STYLE = {
+  info:    { bg:'bg-indigo-500', border:'border-indigo-600', icon:'fa-circle-info' },
+  success: { bg:'bg-green-500',  border:'border-green-600',  icon:'fa-circle-check' },
+  warning: { bg:'bg-yellow-500', border:'border-yellow-600', icon:'fa-triangle-exclamation' },
+  error:   { bg:'bg-red-500',    border:'border-red-600',    icon:'fa-circle-xmark' }
+};
+
+const ToastContext = createContext(null);
+
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((message, type = 'info', duration = 3000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev.slice(-4), { id, message, type, duration }]);
+    if (duration > 0) setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  }, []);
+  return (
+    <ToastContext.Provider value={addToast}>
+      {children}
+      <div className="fixed top-16 right-4 z-[9999] flex flex-col gap-2 pointer-events-none" style={{ maxWidth: '320px' }}>
+        <AnimatePresence>
+          {toasts.map(t => {
+            const s = TOAST_STYLE[t.type] || TOAST_STYLE.info;
+            return (
+              <motion.div key={t.id}
+                initial={{ opacity:0, x:60, scale:0.9 }}
+                animate={{ opacity:1, x:0,  scale:1 }}
+                exit={{   opacity:0, x:60,  scale:0.9 }}
+                className={`${s.bg} ${s.border} border-l-4 text-white px-4 py-3 rounded-xl shadow-2xl pointer-events-auto flex items-center gap-2 text-sm`}>
+                <i className={`fas ${s.icon} flex-shrink-0`}></i>
+                <span>{t.message}</span>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+function useToast() { return useContext(ToastContext); }
+
+/* ============================================================================
+ * 【區塊 5】GOOGLE SIGN-IN HOOK
+ * ============================================================================ */
+function useGoogleSignIn(userName, setUserName) {
+  const attemptRef = useRef(0);
+  useEffect(() => {
+    if (userName) { document.body.classList.add('logged-in'); return; }
+    document.body.classList.remove('logged-in');
+    const maxAttempts = 60;
+    let timer = null;
+    function tryRender() {
+      attemptRef.current++;
+      if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+        if (attemptRef.current < maxAttempts) timer = setTimeout(tryRender, 300);
+        return;
+      }
+      const el = document.getElementById('googleSignInDiv');
+      if (!el) { if (attemptRef.current < maxAttempts) timer = setTimeout(tryRender, 300); return; }
+      try {
+        window.google.accounts.id.initialize({
+          client_id: CONFIG.GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            try {
+              const payload = decodeJwtResponse(response.credential);
+              const email   = payload.email || '';
+              const name    = payload.name  || email;
+              if (!CONFIG.ALLOWED_EMAIL_DOMAIN || email.endsWith(CONFIG.ALLOWED_EMAIL_DOMAIN)) {
+                setUserName(name);
+                localStorage.setItem(CONFIG.STORAGE.username, name);
+              } else {
+                alert(`請使用學校電郵 (${CONFIG.ALLOWED_EMAIL_DOMAIN}) 登入`);
+              }
+            } catch { alert('登入失敗，請重試'); }
+          }
+        });
+        window.google.accounts.id.renderButton(el, { theme:'outline', size:'large', width: 300 });
+      } catch { /* ignore */ }
+    }
+    timer = setTimeout(tryRender, 300);
+    return () => { if (timer) clearTimeout(timer); };
+  }, [userName, setUserName]);
+}
+
+/* ============================================================================
+ * 【區塊 6】DATA HOOK — 進度資料（雲端 + 本機同步）
+ * ============================================================================
+ *
+ * useProgressData：負責
+ *   1. 從 Google Apps Script 讀取所有學生進度（老師用）
+ *   2. 將本機進度上傳至雲端
+ *
+ * ⚠️ 目前雲端 URL 尚未設定，所有操作只存 localStorage。
+ *    設定 CONFIG.GOOGLE_SCRIPT_URL 後，補充下方 submitProgress() 即可接通雲端。
+ * ============================================================================ */
+function useProgressData(userName) {
+  const [allProgress, setAllProgress] = useState(null);   // { [lessonId]: { [studentName]: progressObj } }
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState(null);
+
+  /* 載入雲端進度（老師用，或自己的進度） */
+  const fetchProgress = useCallback(async () => {
+    if (!userName || userName === '訪客 (未登入)') return;
+    setLoading(true); setError(null);
+
+    // TODO: 接通 Google Apps Script 後，將以下 mock 替換為真實 API 呼叫：
+    // const res  = await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress`);
+    // const data = await res.json();
+    // setAllProgress(data.progress || {});
+
+    /* 暫時從 localStorage 讀取所有進度 */
+    try {
+      const result = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(CONFIG.STORAGE.progress)) continue;
+        // key 格式：fc_progress_{lessonId}_{studentName}
+        const rest   = k.slice(CONFIG.STORAGE.progress.length);
+        const sepIdx = rest.indexOf('_');
+        if (sepIdx < 0) continue;
+        const lessonId    = rest.slice(0, sepIdx);
+        const studentName = rest.slice(sepIdx + 1);
+        try {
+          const val = JSON.parse(localStorage.getItem(k));
+          if (!result[lessonId]) result[lessonId] = {};
+          result[lessonId][studentName] = val;
+        } catch { /* ignore corrupt entries */ }
+      }
+      setAllProgress(result);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [userName]);
+
+  /* 儲存單次課題進度 */
+  const submitProgress = useCallback(async (lessonId, progressObj) => {
+    if (!userName || userName === '訪客 (未登入)') return;
+    saveLocalProgress(lessonId, userName, progressObj);
+
+    // TODO: 上傳至 Google Apps Script：
+    // await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+    //   method: 'POST',
+    //   body: JSON.stringify({ action:'saveProgress', lessonId, student: userName, ...progressObj })
+    // });
+
+    /* 更新本地 allProgress 快照 */
+    setAllProgress(prev => {
+      const next = { ...(prev || {}) };
+      if (!next[lessonId]) next[lessonId] = {};
+      next[lessonId][userName] = progressObj;
+      return next;
+    });
+  }, [userName]);
+
+  useEffect(() => { fetchProgress(); }, [fetchProgress]);
+
+  /* 取得某課題某學生的進度 */
+  const getProgress = useCallback((lessonId, name = userName) => {
+    if (allProgress && allProgress[lessonId] && allProgress[lessonId][name]) {
+      return allProgress[lessonId][name];
+    }
+    return loadLocalProgress(lessonId, name || userName);
+  }, [allProgress, userName]);
+
+  return { allProgress, loading, error, submitProgress, getProgress, refetch: fetchProgress };
+}
+
+/* ============================================================================
+ * 【區塊 7】SHARED COMPONENTS（共用元件）
+ * ============================================================================ */
+
+/* ── 圓形進度環 ── */
+const ProgressRing = memo(function ProgressRing({ pct = 0, size = 48, strokeWidth = 4, label = '', className = '' }) {
+  const r   = (size - strokeWidth * 2) / 2;
+  const C   = 2 * Math.PI * r;
+  const offset = C - (pct / 100) * C;
+  const color = pct >= CONFIG.VIDEO_COMPLETE_THRESHOLD ? '#22c55e'
+              : pct >= 30 ? '#eab308' : '#ef4444';
+  return (
+    <div className={`relative inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+      <svg width={size} height={size}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none"
+          stroke="#e5e7eb" strokeWidth={strokeWidth} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none"
+          stroke={color} strokeWidth={strokeWidth} strokeLinecap="round"
+          strokeDasharray={C} strokeDashoffset={offset}
+          className="progress-ring-circle" />
+      </svg>
+      <span className="absolute text-[10px] font-bold" style={{ color }}>
+        {label || `${Math.round(pct)}%`}
+      </span>
+    </div>
+  );
+});
+
+/* ── 課題狀態徽章 ── */
+function LessonStatusBadge({ status }) {
+  const map = {
+    not_started: { label:'未開始', cls:'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400', icon:'fa-circle' },
+    watching:    { label:'觀看中', cls:'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300', icon:'fa-play-circle' },
+    answering:   { label:'作答中', cls:'bg-purple-100 text-purple-600 dark:bg-purple-900/50 dark:text-purple-300', icon:'fa-pen-to-square' },
+    completed:   { label:'已完成', cls:'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300', icon:'fa-circle-check' },
+    overdue:     { label:'已逾期', cls:'bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-300', icon:'fa-clock' },
+  };
+  const s = map[status] || map.not_started;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${s.cls}`}>
+      <i className={`fas ${s.icon} text-[10px]`}></i>
+      {s.label}
+    </span>
+  );
+}
+
+/* ── 課題卡片（學生主頁使用） ── */
+function LessonCard({ lesson, progress, onClick }) {
+  const watchPct     = progress?.watchPct     || 0;
+  const isCompleted  = !!progress?.completedAt;
+  const questionsAnswered = progress?.answers ? Object.keys(progress.answers).length : 0;
+  const totalQ = lesson.questions?.length || 0;
+
+  let status = 'not_started';
+  if (isCompleted) status = 'completed';
+  else if (questionsAnswered > 0) status = 'answering';
+  else if (watchPct > 0) status = 'watching';
+  else if (lesson.dueDate && isOverdue(lesson.dueDate)) status = 'overdue';
+
+  return (
+    <motion.div
+      whileHover={{ scale: 1.015 }}
+      whileTap={{ scale: 0.985 }}
+      onClick={onClick}
+      className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden"
+    >
+      {/* 左側色條 */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl ${
+        isCompleted ? 'bg-green-500' : watchPct > 0 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600'
+      }`} />
+
+      <div className="pl-3 flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          {/* 主題標籤 */}
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-xs bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">
+              {lesson.topic}
+            </span>
+            <LessonStatusBadge status={status} />
+            {lesson.dueDate && isDueSoon(lesson.dueDate) && !isCompleted && (
+              <span className="text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                <i className="fas fa-clock mr-1"></i>即將截止
+              </span>
+            )}
+            {lesson.dueDate && isOverdue(lesson.dueDate) && !isCompleted && (
+              <span className="text-xs bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 px-2 py-0.5 rounded-full font-bold">
+                <i className="fas fa-triangle-exclamation mr-1"></i>已逾期
+              </span>
+            )}
+          </div>
+
+          {/* 標題 */}
+          <h3 className="font-bold text-gray-800 dark:text-gray-100 text-base leading-snug truncate">{lesson.title}</h3>
+
+          {/* 描述 */}
+          {lesson.description && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{lesson.description}</p>
+          )}
+
+          {/* 底部 meta */}
+          <div className="mt-2 flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
+            {lesson.estimatedMin && (
+              <span><i className="fas fa-clock mr-1"></i>{lesson.estimatedMin} 分鐘</span>
+            )}
+            {totalQ > 0 && (
+              <span>
+                <i className="fas fa-question-circle mr-1"></i>
+                {totalQ} 道題
+                {questionsAnswered > 0 && <span className="text-indigo-500 dark:text-indigo-400 font-bold ml-1">（已答 {questionsAnswered}）</span>}
+              </span>
+            )}
+            {lesson.dueDate && (
+              <span className={isOverdue(lesson.dueDate) && !isCompleted ? 'text-red-400' : ''}>
+                <i className="fas fa-calendar-alt mr-1"></i>截止 {lesson.dueDate}
+              </span>
+            )}
+          </div>
+
+          {/* 影片觀看進度條 */}
+          {watchPct > 0 && (
+            <div className="mt-2">
+              <div className="flex justify-between text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">
+                <span>影片觀看進度</span>
+                <span className={`font-bold ${watchPctColor(watchPct)}`}>{fmtPct(watchPct)}</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-700 ${watchPctBg(watchPct)}`}
+                     style={{ width: fmtPct(watchPct) }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 右側進度環 */}
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          <ProgressRing pct={watchPct} size={52} strokeWidth={5} />
+          <span className="text-[9px] text-gray-400 dark:text-gray-500">觀看</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ── 全屏 Loading ── */
+function FullScreenLoader({ text = '載入中...' }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 text-gray-400 dark:text-gray-500 gap-3">
+      <i className="fas fa-spinner fa-spin text-3xl text-indigo-400"></i>
+      <span className="text-sm">{text}</span>
+    </div>
+  );
+}
+
+/* ── 空狀態提示 ── */
+function EmptyState({ icon, title, subtitle }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+      <div className="text-5xl opacity-40">{icon}</div>
+      <div className="font-bold text-gray-600 dark:text-gray-300 text-lg">{title}</div>
+      {subtitle && <p className="text-sm text-gray-400 dark:text-gray-500 max-w-xs">{subtitle}</p>}
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 8】HOME SCREEN（學生主頁）
+ * ============================================================================ */
+function HomeScreen({
+  userName, setUserName, isGuest, setIsGuest,
+  lessons, getProgress, isDark, onOpenLesson,
+  onShowTeacherDashboard, onShowStudentStats
+}) {
+  const teacher = isTeacher(userName);
+  useGoogleSignIn(userName, setUserName);
+
+  /* 過濾選項 */
+  const [filter, setFilter] = useState('all'); // 'all' | 'pending' | 'completed'
+  const [search, setSearch] = useState('');
+
+  const filteredLessons = useMemo(() => {
+    let list = lessons;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(l => l.title.toLowerCase().includes(q) || l.topic.toLowerCase().includes(q));
+    }
+    if (filter === 'pending') {
+      list = list.filter(l => {
+        const p = getProgress(l.id);
+        return !p?.completedAt;
+      });
+    } else if (filter === 'completed') {
+      list = list.filter(l => !!getProgress(l.id)?.completedAt);
+    }
+    return list;
+  }, [lessons, search, filter, getProgress]);
+
+  const completedCount = useMemo(() =>
+    lessons.filter(l => !!getProgress(l.id)?.completedAt).length,
+  [lessons, getProgress]);
+
+  return (
+    <div className="w-full max-w-lg landscape:max-w-3xl">
+      <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+
+        {/* ── 標題列 ── */}
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg flex-shrink-0">
+            <i className="fas fa-chalkboard text-white text-2xl"></i>
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100 leading-tight">
+              {CONFIG.APP_NAME}
+            </h1>
+            <p className="text-gray-400 dark:text-gray-500 text-xs">{CONFIG.APP_SUBTITLE}</p>
+          </div>
+        </div>
+
+        {/* ── 身分驗證 ── */}
+        <div className="mb-5">
+          {!userName ? (
+            <div className="p-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400 font-bold mb-3 text-center">
+                <i className="fas fa-user-shield mr-2 text-indigo-400"></i>請先登入以記錄學習進度
+              </p>
+              <div id="googleSignInDiv" className="flex justify-center min-h-[40px]"></div>
+              <div className="flex items-center gap-2 my-3">
+                <div className="h-px bg-gray-200 dark:bg-gray-700 flex-1" />
+                <span className="text-xs text-gray-400">或</span>
+                <div className="h-px bg-gray-200 dark:bg-gray-700 flex-1" />
+              </div>
+              <button onClick={() => { setIsGuest(true); setUserName('訪客 (未登入)'); }}
+                className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg border border-gray-200 dark:border-gray-600 text-sm flex items-center justify-center gap-2 transition-colors">
+                <i className="fas fa-user-secret"></i>訪客模式（不記錄進度）
+              </button>
+            </div>
+          ) : (
+            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 border border-indigo-100 dark:border-indigo-800 rounded-xl p-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center shadow">
+                  <i className="fas fa-user text-white"></i>
+                </div>
+                <div>
+                  <div className="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                    {shortenName(userName)}
+                    {teacher && (
+                      <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full font-bold">
+                        👨‍🏫 老師
+                      </span>
+                    )}
+                  </div>
+                  {!teacher && (
+                    <div className="text-xs text-indigo-600 dark:text-indigo-400">
+                      已完成 {completedCount}/{lessons.length} 課
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => { setUserName(''); localStorage.removeItem(CONFIG.STORAGE.username); }}
+                className="text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 flex flex-col items-center transition-colors">
+                <i className="fas fa-sign-out-alt mb-0.5"></i>登出
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── 學生整體進度條 ── */}
+        {userName && !teacher && lessons.length > 0 && (
+          <div className="mb-4 p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl">
+            <div className="flex justify-between text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+              <span>整體完成進度</span>
+              <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                {completedCount} / {lessons.length} 課
+              </span>
+            </div>
+            <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-1000 relative"
+                   style={{ width: `${lessons.length > 0 ? (completedCount/lessons.length)*100 : 0}%` }}>
+                <div className="absolute inset-0 progress-shine rounded-full" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── 課題篩選列（學生用） ── */}
+        {!teacher && lessons.length > 0 && (
+          <div className="mb-3 flex gap-2 flex-wrap">
+            {[
+              { id:'all',       label:'全部',   icon:'fa-list' },
+              { id:'pending',   label:'未完成', icon:'fa-hourglass-half' },
+              { id:'completed', label:'已完成', icon:'fa-check-circle' },
+            ].map(f => (
+              <button key={f.id} onClick={() => setFilter(f.id)}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  filter === f.id
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}>
+                <i className={`fas ${f.icon}`}></i>{f.label}
+              </button>
+            ))}
+            <input
+              type="text" placeholder="搜索課題..." value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="flex-1 min-w-32 text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-600"
+            />
+          </div>
+        )}
+
+        {/* ── 課題列表 ── */}
+        {lessons.length === 0 ? (
+          <EmptyState
+            icon="📹"
+            title="尚未加入任何課題"
+            subtitle="老師將在 LESSONS 陣列中加入影片課題後，這裡就會顯示課題卡片。"
+          />
+        ) : filteredLessons.length === 0 ? (
+          <EmptyState icon="🔍" title="沒有符合的課題" />
+        ) : (
+          <div className="space-y-3">
+            {filteredLessons.map(lesson => (
+              <LessonCard
+                key={lesson.id}
+                lesson={lesson}
+                progress={getProgress(lesson.id)}
+                onClick={() => onOpenLesson(lesson)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* ── 底部按鈕列 ── */}
+        <div className="mt-5 space-y-2">
+          {/* 學生：個人學習統計 */}
+          {userName && !teacher && (
+            <button onClick={onShowStudentStats}
+              className="w-full py-2.5 px-4 rounded-xl border-2 border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 font-bold text-sm flex items-center justify-center gap-2 transition-all">
+              <i className="fas fa-chart-bar"></i>
+              <span>我的學習記錄</span>
+            </button>
+          )}
+
+          {/* 老師：教師儀表板 */}
+          {teacher && (
+            <button onClick={onShowTeacherDashboard}
+              className="w-full py-2.5 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg font-bold text-sm flex items-center justify-center gap-2 transition-all">
+              <i className="fas fa-chalkboard-teacher"></i>
+              <span>教師儀表板（班級進度）</span>
+              <i className="fas fa-user-tie"></i>
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 text-center text-[10px] text-gray-300 dark:text-gray-600">
+          v{APP_VERSION}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 9】LESSON PLAYER SCREEN（課題播放畫面）
+ * ============================================================================ */
+function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress, onBack }) {
+  const toast = useToast();
+
+  /* ── 狀態 ── */
+  const [watchPct, setWatchPct]         = useState(initialProgress?.watchPct || 0);
+  const [maxWatchPct, setMaxWatchPct]   = useState(initialProgress?.watchPct || 0);
+  const [answers, setAnswers]           = useState(initialProgress?.answers || {});
+  const [completedAt, setCompletedAt]   = useState(initialProgress?.completedAt || null);
+  const [videoReady, setVideoReady]     = useState(false);
+  const [isPlaying, setIsPlaying]       = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+
+  const playerRef    = useRef(null);
+  const trackTimer   = useRef(null);
+  const containerRef = useRef(null);
+  const hasVideo     = lesson.videoId && lesson.videoId !== 'PLACEHOLDER_VIDEO_ID' && lesson.videoId.trim() !== '';
+  const questionsUnlocked = maxWatchPct >= CONFIG.VIDEO_UNLOCK_THRESHOLD;
+  const totalQ  = lesson.questions?.length || 0;
+  const answered = Object.keys(answers).length;
+  const allAnswered = totalQ > 0 && answered >= totalQ;
+
+  /* ── YouTube 播放器初始化 ── */
+  useEffect(() => {
+    if (!hasVideo) return;
+    let mounted = true;
+    loadYouTubeAPI().then(YT => {
+      if (!mounted) return;
+      playerRef.current = new YT.Player(containerRef.current, {
+        videoId: lesson.videoId,
+        playerVars: { rel: 0, modestbranding: 1, cc_load_policy: 0, hl: 'zh-TW' },
+        events: {
+          onReady:       ()  => { if (mounted) setVideoReady(true); },
+          onStateChange: (e) => {
+            if (!mounted) return;
+            if (e.data === 1) { setIsPlaying(true);  startTracking(YT); }
+            else              { setIsPlaying(false); stopTracking(); }
+          }
+        }
+      });
+    });
+    return () => {
+      mounted = false;
+      stopTracking();
+      if (playerRef.current && playerRef.current.destroy) {
+        try { playerRef.current.destroy(); } catch { /* ignore */ }
+      }
+    };
+  }, [lesson.videoId]);
+
+  function startTracking(YT) {
+    stopTracking();
+    trackTimer.current = setInterval(() => {
+      const p = playerRef.current;
+      if (!p || typeof p.getCurrentTime !== 'function') return;
+      const cur = p.getCurrentTime();
+      const dur = p.getDuration();
+      if (!dur || dur <= 0) return;
+      const pct = Math.round((cur / dur) * 100);
+      setWatchPct(pct);
+      setMaxWatchPct(prev => {
+        const next = Math.max(prev, pct);
+        return next;
+      });
+    }, 2000);
+  }
+
+  function stopTracking() {
+    if (trackTimer.current) { clearInterval(trackTimer.current); trackTimer.current = null; }
+  }
+
+  /* ── 自動儲存進度（每 10 秒或 watchPct 達關鍵節點） ── */
+  useEffect(() => {
+    const prog = { watchPct: maxWatchPct, answers, completedAt, startedAt: initialProgress?.startedAt || new Date().toISOString() };
+    onSaveProgress(lesson.id, prog);
+  }, [maxWatchPct, completedAt]); // intentionally limited deps
+
+  /* ── 提交答案 ── */
+  async function handleSubmit() {
+    if (!allAnswered) { toast('請先回答所有題目', 'warning'); return; }
+    setSubmitLoading(true);
+    const now = new Date().toISOString();
+    const prog = { watchPct: maxWatchPct, answers, completedAt: now, startedAt: initialProgress?.startedAt || now };
+    await onSaveProgress(lesson.id, prog);
+    setCompletedAt(now);
+    setSubmitLoading(false);
+    toast('🎉 課題完成！進度已儲存', 'success', 4000);
+  }
+
+  /* ── 更新單題答案 ── */
+  function setAnswer(qId, val) {
+    setAnswers(prev => ({ ...prev, [qId]: val }));
+  }
+
+  return (
+    <div className="w-full max-w-2xl landscape:max-w-5xl">
+      <div className="glass-panel rounded-2xl shadow-xl overflow-hidden">
+
+        {/* ── 頂欄 ── */}
+        <div className="flex items-center gap-3 p-4 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30">
+          <button onClick={onBack}
+            className="w-9 h-9 rounded-full bg-white dark:bg-gray-700 shadow flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex-shrink-0">
+            <i className="fas fa-arrow-left"></i>
+          </button>
+          <div className="flex-1 min-w-0">
+            <span className="text-xs text-indigo-500 dark:text-indigo-400 font-bold">{lesson.topic}</span>
+            <h2 className="font-bold text-gray-800 dark:text-gray-100 truncate text-sm md:text-base">
+              {lesson.title}
+            </h2>
+          </div>
+          {completedAt && (
+            <span className="flex-shrink-0 text-xs bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 px-2 py-1 rounded-full font-bold">
+              <i className="fas fa-check-circle mr-1"></i>已完成
+            </span>
+          )}
+        </div>
+
+        <div className="overflow-y-auto custom-scrollbar max-h-[calc(92vh-64px)] p-4 md:p-6">
+
+          {/* ═══════════════════════════════════════════════
+           * 【影片區域】
+           * 填入實際課題後，此處將顯示 YouTube 嵌入播放器
+           * ═══════════════════════════════════════════════ */}
+          <div className="mb-4">
+            <div className="relative rounded-xl overflow-hidden shadow-lg bg-black aspect-video">
+              {hasVideo ? (
+                /* YouTube 播放器容器 */
+                <div ref={containerRef} className="w-full h-full" />
+              ) : (
+                /* 佔位符：尚未填入影片 ID 時顯示 */
+                <div className="video-placeholder absolute inset-0 flex flex-col items-center justify-center gap-3">
+                  <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-lg text-center max-w-xs border-2 border-dashed border-gray-300 dark:border-gray-600">
+                    <i className="fab fa-youtube text-5xl text-red-500 mb-3"></i>
+                    <p className="font-bold text-gray-700 dark:text-gray-200 text-sm">影片尚未設定</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                      請在 <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">LESSONS</code> 陣列中填入 <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">videoId</code>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 影片觀看進度條 */}
+            <div className="mt-2 flex items-center gap-2">
+              <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-700 ${watchPctBg(maxWatchPct)}`}
+                     style={{ width: fmtPct(maxWatchPct) }} />
+              </div>
+              <span className={`text-xs font-bold flex-shrink-0 ${watchPctColor(maxWatchPct)}`}>
+                {fmtPct(maxWatchPct)}
+              </span>
+              <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">已觀看</span>
+            </div>
+
+            {/* 影片解鎖提示 */}
+            {!questionsUnlocked && (
+              <div className="mt-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-2 flex items-center gap-2">
+                <i className="fas fa-lock"></i>
+                <span>請先觀看至少 <strong>{CONFIG.VIDEO_UNLOCK_THRESHOLD}%</strong> 的影片，即可解鎖答題。（目前：{fmtPct(maxWatchPct)}）</span>
+              </div>
+            )}
+            {questionsUnlocked && !completedAt && (
+              <div className="mt-2 text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-lg p-2 flex items-center gap-2">
+                <i className="fas fa-unlock"></i>
+                <span>影片觀看達標！題目已解鎖，請完成以下問題。</span>
+              </div>
+            )}
+          </div>
+
+          {/* ═══════════════════════════════════════════════
+           * 【題目區域】
+           * ═══════════════════════════════════════════════ */}
+          <div className="relative">
+
+            {/* 鎖定遮罩 */}
+            {!questionsUnlocked && (
+              <div className="question-lock-overlay absolute inset-0 z-10 rounded-xl bg-white/70 dark:bg-gray-900/70 flex flex-col items-center justify-center gap-3">
+                <i className="fas fa-lock text-4xl text-gray-400 dark:text-gray-500"></i>
+                <p className="text-sm font-bold text-gray-500 dark:text-gray-400">
+                  觀看影片達 {CONFIG.VIDEO_UNLOCK_THRESHOLD}% 後解鎖題目
+                </p>
+              </div>
+            )}
+
+            {/* 題目列表 */}
+            {totalQ === 0 ? (
+              <div className="py-8 text-center text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl">
+                <i className="fas fa-question-circle text-3xl mb-2 opacity-40"></i>
+                <p className="text-sm font-bold">尚未加入題目</p>
+                <p className="text-xs mt-1 text-gray-400">請在 LESSONS 陣列的 <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">questions</code> 欄位填入題目</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <h3 className="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2 text-sm">
+                  <i className="fas fa-clipboard-question text-indigo-500"></i>
+                  課題問題（{answered}/{totalQ} 已作答）
+                </h3>
+
+                {/* ──────────────────────────────────────────────────
+                 * TODO: 以下為題目渲染範例
+                 * 實際課題資料填入後，此處將根據 question.type 渲染：
+                 *   'mcq'  → 選擇題（4 選項按鈕）
+                 *   'fill' → 填充題（文字輸入框）
+                 * ────────────────────────────────────────────────── */}
+                {lesson.questions.map((q, idx) => (
+                  <QuestionItem
+                    key={q.id}
+                    question={q}
+                    index={idx}
+                    answer={answers[q.id]}
+                    onAnswer={(val) => setAnswer(q.id, val)}
+                    disabled={!!completedAt}
+                  />
+                ))}
+
+                {/* 提交按鈕 */}
+                {!completedAt && (
+                  <button onClick={handleSubmit}
+                    disabled={!allAnswered || submitLoading}
+                    className={`w-full py-3 px-6 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-2 mt-2 ${
+                      allAnswered
+                        ? 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white hover:scale-[1.02]'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                    }`}>
+                    {submitLoading
+                      ? <><i className="fas fa-spinner fa-spin"></i>儲存中...</>
+                      : allAnswered
+                        ? <><i className="fas fa-paper-plane"></i>提交答案</>
+                        : <><i className="fas fa-pen"></i>請完成所有題目（{answered}/{totalQ}）</>}
+                  </button>
+                )}
+
+                {completedAt && (
+                  <div className="p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-xl text-center">
+                    <i className="fas fa-trophy text-3xl text-yellow-500 mb-2"></i>
+                    <p className="font-bold text-green-700 dark:text-green-300">課題已完成！</p>
+                    <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                      完成時間：{new Date(completedAt).toLocaleString('zh-HK')}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── 單道題目渲染元件 ── */
+function QuestionItem({ question, index, answer, onAnswer, disabled }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 shadow-sm">
+      <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold mr-2 flex-shrink-0">
+          {index + 1}
+        </span>
+        {question.text}
+      </p>
+
+      {question.type === 'mcq' && (
+        <div className="grid grid-cols-1 gap-2">
+          {question.options.map((opt, oi) => {
+            const selected = answer === String(oi);
+            const isCorrect = disabled && oi === question.answer;
+            const isWrong   = disabled && selected && oi !== question.answer;
+            return (
+              <button key={oi} onClick={() => !disabled && onAnswer(String(oi))}
+                className={`text-left px-4 py-2.5 rounded-lg border-2 text-sm transition-all font-medium ${
+                  disabled
+                    ? isCorrect ? 'border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                      : isWrong  ? 'border-red-400 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                      : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 opacity-60'
+                    : selected
+                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 shadow'
+                      : 'border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20'
+                }`}>
+                <span className="font-bold mr-2">{['A','B','C','D','E'][oi]}.</span>
+                {opt}
+                {disabled && isCorrect && <i className="fas fa-check ml-2 text-green-500"></i>}
+                {disabled && isWrong   && <i className="fas fa-times ml-2 text-red-500"></i>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {question.type === 'fill' && (
+        <div>
+          <input
+            type="text"
+            value={answer || ''}
+            onChange={e => !disabled && onAnswer(e.target.value)}
+            disabled={disabled}
+            placeholder="請在此輸入答案..."
+            className={`w-full px-4 py-2.5 border-2 rounded-lg text-sm focus:outline-none transition-colors ${
+              disabled
+                ? 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-default'
+                : 'border-gray-200 dark:border-gray-600 focus:border-indigo-400 dark:focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200'
+            }`}
+          />
+          {disabled && answer && (
+            <div className="mt-1.5 text-xs text-green-600 dark:text-green-400">
+              <i className="fas fa-check-circle mr-1"></i>
+              參考答案：{question.answer}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 10】STUDENT STATS SCREEN（學生個人學習記錄）
+ * ============================================================================ */
+function StudentStatsScreen({ userName, lessons, getProgress, onBack }) {
+  const stats = useMemo(() => {
+    return lessons.map(l => {
+      const p = getProgress(l.id);
+      return {
+        lesson: l,
+        watchPct:   p?.watchPct   || 0,
+        answered:   p?.answers ? Object.keys(p.answers).length : 0,
+        totalQ:     l.questions?.length || 0,
+        completedAt: p?.completedAt || null,
+        startedAt:   p?.startedAt  || null,
+      };
+    });
+  }, [lessons, getProgress]);
+
+  const completed  = stats.filter(s => s.completedAt).length;
+  const inProgress = stats.filter(s => !s.completedAt && s.watchPct > 0).length;
+  const avgWatch   = stats.length > 0
+    ? Math.round(stats.reduce((a,s) => a + s.watchPct, 0) / stats.length)
+    : 0;
+
+  return (
+    <div className="w-full max-w-lg">
+      <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onBack}
+            className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i className="fas fa-arrow-left"></i>
+          </button>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">我的學習記錄</h2>
+        </div>
+
+        {/* KPI 卡 */}
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          {[
+            { icon:'✅', label:'已完成', value: completed,  color:'from-green-500 to-emerald-500' },
+            { icon:'▶️', label:'進行中', value: inProgress, color:'from-blue-500 to-cyan-500' },
+            { icon:'📊', label:'平均觀看', value: `${avgWatch}%`, color:'from-indigo-500 to-purple-500' },
+          ].map((k,i) => (
+            <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3 text-center">
+              <div className="text-xl mb-1">{k.icon}</div>
+              <div className={`text-xl font-bold bg-gradient-to-r ${k.color} bg-clip-text text-transparent`}>{k.value}</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500">{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* 課題明細 */}
+        <div className="space-y-2">
+          {stats.map(s => (
+            <div key={s.lesson.id}
+              className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3">
+              <ProgressRing pct={s.watchPct} size={44} strokeWidth={4} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-700 dark:text-gray-200 truncate">{s.lesson.title}</p>
+                <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  <span>觀看 {fmtPct(s.watchPct)}</span>
+                  {s.totalQ > 0 && <span>· 題目 {s.answered}/{s.totalQ}</span>}
+                  {s.completedAt && <span className="text-green-500 dark:text-green-400 font-bold">· 已完成</span>}
+                </div>
+              </div>
+              <LessonStatusBadge status={
+                s.completedAt ? 'completed'
+                : s.answered > 0 ? 'answering'
+                : s.watchPct > 0 ? 'watching'
+                : 'not_started'
+              } />
+            </div>
+          ))}
+        </div>
+
+        {stats.length === 0 && (
+          <EmptyState icon="📚" title="尚無學習記錄" subtitle="完成課題後這裡將顯示你的進度統計" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 11】TEACHER DASHBOARD SCREEN（教師儀表板）
+ * ============================================================================ */
+function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonReport, onRefresh, loading }) {
+  /* 計算每課題的統計 */
+  const lessonStats = useMemo(() => {
+    return lessons.map(lesson => {
+      const progressMap = allProgress?.[lesson.id] || {};
+      const students    = Object.entries(progressMap);
+      const started     = students.length;
+      const completed   = students.filter(([,p]) => p.completedAt).length;
+      const avgWatch    = started > 0
+        ? Math.round(students.reduce((a,[,p]) => a + (p.watchPct||0), 0) / started)
+        : 0;
+      return { lesson, started, completed, avgWatch, progressMap };
+    });
+  }, [lessons, allProgress]);
+
+  const totalStudents   = useMemo(() => {
+    const names = new Set();
+    Object.values(allProgress || {}).forEach(lp =>
+      Object.keys(lp).forEach(n => names.add(n))
+    );
+    return names.size;
+  }, [allProgress]);
+
+  const totalCompleted  = lessonStats.reduce((a,s) => a + s.completed, 0);
+
+  return (
+    <div className="w-full max-w-3xl">
+      <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+
+        {/* ── 標頭 ── */}
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onBack}
+            className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i className="fas fa-arrow-left"></i>
+          </button>
+          <div className="flex-1">
+            <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
+              <i className="fas fa-chalkboard-teacher text-amber-500 mr-2"></i>教師儀表板
+            </h2>
+            <p className="text-xs text-gray-400 dark:text-gray-500">查看全班的影片觀看進度與答題情況</p>
+          </div>
+          <button onClick={onRefresh}
+            className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            title="重新整理">
+            <i className={`fas fa-rotate-right ${loading ? 'fa-spin' : ''}`}></i>
+          </button>
+        </div>
+
+        {/* ── KPI 列 ── */}
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          {[
+            { icon:'📹', label:'課題總數',     value: lessons.length,  color:'from-indigo-500 to-purple-500' },
+            { icon:'👥', label:'參與學生',     value: totalStudents,   color:'from-blue-500 to-cyan-500' },
+            { icon:'✅', label:'完成人次',     value: totalCompleted,  color:'from-green-500 to-emerald-500' },
+          ].map((k,i) => (
+            <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3 text-center">
+              <div className="text-xl mb-1">{k.icon}</div>
+              <div className={`text-2xl font-bold bg-gradient-to-r ${k.color} bg-clip-text text-transparent`}>{k.value}</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500">{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── 課題列表 ── */}
+        {lessons.length === 0 ? (
+          <EmptyState icon="📹" title="尚未設定任何課題" subtitle="在 LESSONS 陣列中填入課題後，這裡將顯示班級進度。" />
+        ) : (
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
+              <i className="fas fa-list-check text-indigo-500"></i>各課題完成情況
+            </h3>
+            {lessonStats.map(s => (
+              <button key={s.lesson.id}
+                onClick={() => onViewLessonReport(s.lesson)}
+                className="w-full text-left bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-700 transition-all hover:scale-[1.01]">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="text-xs bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">
+                        {s.lesson.topic}
+                      </span>
+                      {s.lesson.dueDate && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                          isOverdue(s.lesson.dueDate)
+                            ? 'bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300'
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                        }`}>
+                          截止 {s.lesson.dueDate}
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-bold text-gray-800 dark:text-gray-100 truncate">{s.lesson.title}</p>
+
+                    {/* 完成率進度條 */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                        {s.started > 0 && (
+                          <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-700"
+                               style={{ width: `${(s.completed / Math.max(s.started,1)) * 100}%` }} />
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+                        {s.started > 0 ? `${s.completed}/${s.started} 人完成` : '尚無人觀看'}
+                      </span>
+                    </div>
+
+                    {/* 平均觀看 */}
+                    {s.started > 0 && (
+                      <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        平均觀看 <span className={`font-bold ${watchPctColor(s.avgWatch)}`}>{fmtPct(s.avgWatch)}</span>
+                        ·  {s.started} 人已開始
+                      </div>
+                    )}
+                  </div>
+                  <i className="fas fa-chevron-right text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0"></i>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 12】TEACHER LESSON REPORT SCREEN（教師 - 單課題詳細報告）
+ * ============================================================================ */
+function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
+  const [expandedStudent, setExpandedStudent] = useState(null);
+
+  const progressMap  = allProgress?.[lesson.id] || {};
+  const studentList  = Object.entries(progressMap)
+    .map(([name, p]) => ({ name, ...p }))
+    .sort((a,b) => (b.watchPct||0) - (a.watchPct||0));
+
+  const totalQ      = lesson.questions?.length || 0;
+  const qIds        = lesson.questions?.map(q => q.id) || [];
+
+  const avgWatch    = studentList.length > 0
+    ? Math.round(studentList.reduce((a,s) => a + (s.watchPct||0), 0) / studentList.length)
+    : 0;
+  const completedCount = studentList.filter(s => s.completedAt).length;
+
+  return (
+    <div className="w-full max-w-4xl">
+      <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+
+        {/* ── 標頭 ── */}
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onBack}
+            className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i className="fas fa-arrow-left"></i>
+          </button>
+          <div className="flex-1 min-w-0">
+            <span className="text-xs text-amber-500 font-bold">課題報告</span>
+            <h2 className="font-bold text-gray-800 dark:text-gray-100 truncate">{lesson.title}</h2>
+          </div>
+        </div>
+
+        {/* ── KPI ── */}
+        <div className="grid grid-cols-4 gap-2 mb-5">
+          {[
+            { icon:'👥', label:'已開始',   value: studentList.length, color:'from-blue-500 to-cyan-500' },
+            { icon:'✅', label:'已完成',   value: completedCount,     color:'from-green-500 to-emerald-500' },
+            { icon:'📊', label:'平均觀看', value: fmtPct(avgWatch),   color:'from-indigo-500 to-purple-500' },
+            { icon:'❓', label:'題目數',   value: totalQ,             color:'from-orange-500 to-amber-500' },
+          ].map((k,i) => (
+            <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-2.5 text-center">
+              <div className="text-lg mb-0.5">{k.icon}</div>
+              <div className={`text-xl font-bold bg-gradient-to-r ${k.color} bg-clip-text text-transparent`}>{k.value}</div>
+              <div className="text-[10px] text-gray-400 dark:text-gray-500">{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── 學生進度列表 ── */}
+        {studentList.length === 0 ? (
+          <EmptyState icon="👥" title="尚無學生開始此課題" subtitle="學生完成觀看後，這裡將顯示詳細的進度報告。" />
+        ) : (
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
+              <i className="fas fa-users text-indigo-500"></i>學生進度（按觀看%排序）
+            </h3>
+
+            {/* 表格標頭 */}
+            <div className="grid text-xs font-bold text-gray-400 dark:text-gray-500 px-4 py-2"
+                 style={{ gridTemplateColumns: '1fr 120px 80px 80px 40px' }}>
+              <span>學生</span>
+              <span className="text-center">影片觀看</span>
+              <span className="text-center">答題</span>
+              <span className="text-center">狀態</span>
+              <span></span>
+            </div>
+
+            {studentList.map(s => {
+              const answered    = s.answers ? Object.keys(s.answers).length : 0;
+              const isExpanded  = expandedStudent === s.name;
+              return (
+                <div key={s.name} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden transition-all">
+                  {/* 主行 */}
+                  <div className="grid items-center px-4 py-3 gap-2"
+                       style={{ gridTemplateColumns: '1fr 120px 80px 80px 40px' }}>
+                    {/* 學生名 */}
+                    <div className="font-medium text-gray-700 dark:text-gray-200 text-sm truncate flex items-center gap-2">
+                      <i className="fas fa-user-circle text-gray-300 dark:text-gray-600"></i>
+                      {shortenName(s.name)}
+                    </div>
+
+                    {/* 觀看進度條 */}
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-700 ${watchPctBg(s.watchPct)}`}
+                             style={{ width: fmtPct(s.watchPct) }} />
+                      </div>
+                      <span className={`text-xs font-bold flex-shrink-0 w-9 text-right ${watchPctColor(s.watchPct)}`}>
+                        {fmtPct(s.watchPct)}
+                      </span>
+                    </div>
+
+                    {/* 答題 */}
+                    <div className="text-center text-sm">
+                      {totalQ > 0
+                        ? <span className={answered >= totalQ ? 'text-green-500 dark:text-green-400 font-bold' : 'text-gray-500 dark:text-gray-400'}>
+                            {answered}/{totalQ}
+                          </span>
+                        : <span className="text-gray-300 dark:text-gray-600">—</span>
+                      }
+                    </div>
+
+                    {/* 狀態 */}
+                    <div className="flex justify-center">
+                      <LessonStatusBadge status={
+                        s.completedAt ? 'completed'
+                        : answered > 0 ? 'answering'
+                        : s.watchPct > 0 ? 'watching'
+                        : 'not_started'
+                      } />
+                    </div>
+
+                    {/* 展開按鈕 */}
+                    <button onClick={() => setExpandedStudent(isExpanded ? null : s.name)}
+                      className="flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
+                      <i className={`fas fa-chevron-${isExpanded ? 'up' : 'down'} text-xs`}></i>
+                    </button>
+                  </div>
+
+                  {/* 展開：顯示各題答案 */}
+                  {isExpanded && totalQ > 0 && (
+                    <div className="px-4 pb-3 pt-0 border-t border-gray-50 dark:border-gray-700/50">
+                      <div className="mt-2 space-y-1.5">
+                        {lesson.questions.map((q, qi) => {
+                          const ans = s.answers?.[q.id];
+                          const correct = q.type === 'mcq'
+                            ? ans === String(q.answer)
+                            : ans?.toLowerCase().trim() === q.answer?.toLowerCase().trim();
+                          return (
+                            <div key={q.id} className="flex items-start gap-2 text-xs">
+                              <span className="font-bold text-gray-400 dark:text-gray-500 flex-shrink-0 w-6 text-right">Q{qi+1}</span>
+                              <span className="text-gray-500 dark:text-gray-400 flex-1 min-w-0 truncate" title={q.text}>{q.text}</span>
+                              {ans !== undefined ? (
+                                <span className={`flex-shrink-0 px-2 py-0.5 rounded font-bold ${
+                                  correct
+                                    ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
+                                    : 'bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300'
+                                }`}>
+                                  {q.type === 'mcq' ? `選 ${['A','B','C','D'][parseInt(ans)]}` : ans}
+                                  <i className={`fas ${correct ? 'fa-check' : 'fa-times'} ml-1`}></i>
+                                </span>
+                              ) : (
+                                <span className="flex-shrink-0 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">
+                                  未作答
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {s.completedAt && (
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
+                          <i className="fas fa-clock mr-1"></i>
+                          完成於 {new Date(s.completedAt).toLocaleString('zh-HK')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 13】MAIN APP（主應用）
+ * ============================================================================ */
+function FlippedClassroomApp() {
+  /* ── 持久化狀態 ── */
+  const [userName, setUserName] = useState(() => localStorage.getItem(CONFIG.STORAGE.username) || '');
+  const [isGuest, setIsGuest]   = useState(false);
+  const [isDark, setIsDark]     = useState(() => localStorage.getItem(CONFIG.STORAGE.darkMode) === 'true');
+
+  /* ── 頁面狀態機 ── */
+  const [screen, setScreen] = useState('home');
+  // 'home' | 'lesson' | 'student_stats' | 'teacher_dashboard' | 'teacher_lesson_report'
+
+  /* ── 選中的課題（用於 lesson / teacher_lesson_report） ── */
+  const [activelesson, setActiveLesson] = useState(null);
+
+  /* ── 進度資料 ── */
+  const { allProgress, loading, error, submitProgress, getProgress, refetch } =
+    useProgressData(userName);
+
+  /* ── 深色模式同步 ── */
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark);
+    localStorage.setItem(CONFIG.STORAGE.darkMode, isDark);
+  }, [isDark]);
+
+  /* ── 登出清理 ── */
+  useEffect(() => {
+    if (!userName) {
+      localStorage.removeItem(CONFIG.STORAGE.username);
+      setIsGuest(false);
+      setScreen('home');
+    } else {
+      localStorage.setItem(CONFIG.STORAGE.username, userName);
+    }
+  }, [userName]);
+
+  /* ── 頁面切換時更新 window.__APP_STATE__ ── */
+  useEffect(() => {
+    window.__APP_STATE__ = { gameState: screen };
+    window.dispatchEvent(new Event('app-state-changed'));
+  }, [screen]);
+
+  /* ── 進入課題 ── */
+  function handleOpenLesson(lesson) {
+    setActiveLesson(lesson);
+    setScreen('lesson');
+  }
+
+  /* ── 儲存課題進度 ── */
+  async function handleSaveProgress(lessonId, progressObj) {
+    await submitProgress(lessonId, progressObj);
+  }
+
+  const toast = useToast();
+  if (error) toast(`進度資料載入錯誤: ${error}`, 'error');
+
+  return (
+    <div className={`min-h-screen transition-colors ${isDark ? 'dark bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50/30 to-blue-50'} flex items-start justify-center p-3 md:p-6 pt-4`}>
+
+      {/* ── 深色模式切換按鈕（固定右上角） ── */}
+      <button onClick={() => setIsDark(d => !d)}
+        className="fixed top-4 right-4 z-[999] w-10 h-10 rounded-full bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-yellow-400 flex items-center justify-center transition-all hover:scale-110">
+        {isDark ? <i className="fas fa-sun text-lg"></i> : <i className="fas fa-moon text-lg"></i>}
+      </button>
+
+      {/* ── 主畫面 ── */}
+      <AnimatePresence mode="wait">
+
+        {screen === 'home' && (
+          <motion.div key="home" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-20}}
+            className="w-full flex justify-center">
+            <HomeScreen
+              userName={userName} setUserName={setUserName}
+              isGuest={isGuest}   setIsGuest={setIsGuest}
+              lessons={LESSONS}
+              getProgress={(lid) => getProgress(lid)}
+              isDark={isDark}
+              onOpenLesson={handleOpenLesson}
+              onShowTeacherDashboard={() => setScreen('teacher_dashboard')}
+              onShowStudentStats={() => setScreen('student_stats')}
+            />
+          </motion.div>
+        )}
+
+        {screen === 'lesson' && activelesson && (
+          <motion.div key="lesson" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
+            className="w-full flex justify-center">
+            <LessonPlayerScreen
+              lesson={activelesson}
+              userName={userName}
+              initialProgress={getProgress(activelesson.id)}
+              onSaveProgress={handleSaveProgress}
+              onBack={() => setScreen('home')}
+            />
+          </motion.div>
+        )}
+
+        {screen === 'student_stats' && (
+          <motion.div key="student_stats" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
+            className="w-full flex justify-center">
+            <StudentStatsScreen
+              userName={userName}
+              lessons={LESSONS}
+              getProgress={(lid) => getProgress(lid)}
+              onBack={() => setScreen('home')}
+            />
+          </motion.div>
+        )}
+
+        {screen === 'teacher_dashboard' && (
+          <motion.div key="tdash" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
+            className="w-full flex justify-center">
+            {isTeacher(userName) ? (
+              <TeacherDashboardScreen
+                lessons={LESSONS}
+                allProgress={allProgress}
+                loading={loading}
+                onBack={() => setScreen('home')}
+                onRefresh={refetch}
+                onViewLessonReport={(lesson) => { setActiveLesson(lesson); setScreen('teacher_lesson_report'); }}
+              />
+            ) : (
+              <div className="glass-panel p-8 rounded-2xl shadow-xl text-center max-w-sm">
+                <i className="fas fa-lock text-4xl text-red-500 mb-4"></i>
+                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">權限不足</h2>
+                <p className="text-gray-500 dark:text-gray-400 mb-4 text-sm">此頁面僅限教師使用。</p>
+                <button onClick={() => setScreen('home')}
+                  className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg transition-colors">
+                  返回主頁
+                </button>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {screen === 'teacher_lesson_report' && activelesson && (
+          <motion.div key="treport" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
+            className="w-full flex justify-center">
+          {isTeacher(userName) ? (
+            <TeacherLessonReportScreen
+              lesson={activelesson}
+              allProgress={allProgress}
+              onBack={() => setScreen('teacher_dashboard')}
+            />
+          ) : (
+            <div className="glass-panel p-8 rounded-2xl shadow-xl text-center max-w-sm">
+              <i className="fas fa-lock text-4xl text-red-500 mb-4"></i>
+              <button onClick={() => setScreen('home')} className="bg-gray-600 text-white px-6 py-2 rounded-lg">返回</button>
+            </div>
+          )}
+          </motion.div>
+        )}
+
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 14】ROOT RENDER
+ * ============================================================================ */
+function Root() {
+  return (
+    <ToastProvider>
+      <FlippedClassroomApp />
+    </ToastProvider>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<Root />);
+
+</script>
+</body>
+</html>
