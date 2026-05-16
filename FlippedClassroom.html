@@ -714,9 +714,9 @@ function EmptyState({ icon, title, subtitle, action }) {
 function HomeScreen({
   userName, setUserName, isGuest, setIsGuest,
   lessons, lessonsLoading, lessonsError, refetchLessons,
-  getProgress, isDark, onOpenLesson,
-  onShowTeacherDashboard, onShowStudentStats
+  getProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin // 👈 新增 onOpenAdmin
 }) {
+  
   const teacher = isTeacher(userName);
   useGoogleSignIn(userName, setUserName);
 
@@ -911,14 +911,22 @@ function HomeScreen({
             </button>
           )}
 
-          {teacher && (
-            <button onClick={onShowTeacherDashboard}
-              className="w-full py-2.5 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg font-bold text-sm flex items-center justify-center gap-2 transition-all">
+          {/* ── 教師專區 ── */}
+        {teacher && (
+          <div className="mb-4 flex flex-col gap-2">
+            <button onClick={onOpenTeacher}
+              className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-3 px-6 rounded-xl shadow-lg font-bold text-sm flex items-center justify-center gap-2 transition-all">
               <i className="fas fa-chalkboard-teacher"></i>
               <span>教師儀表板（班級進度）</span>
-              <i className="fas fa-user-tie"></i>
             </button>
-          )}
+            <button onClick={onOpenAdmin}
+              className="w-full bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white py-3 px-6 rounded-xl shadow-lg font-bold text-sm flex items-center justify-center gap-2 transition-all">
+              <i className="fas fa-bullhorn"></i>
+              <span>發佈新影片任務</span>
+            </button>
+          </div>
+        )}
+        
         </div>
 
         <div className="mt-3 text-center text-[10px] text-gray-300 dark:text-gray-600">
@@ -1651,18 +1659,14 @@ function FlippedClassroomApp() {
           <motion.div key="home" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-20}}
             className="w-full flex justify-center">
             <HomeScreen
-              userName={userName}       setUserName={setUserName}
-              isGuest={isGuest}         setIsGuest={setIsGuest}
-              lessons={lessons}
-              lessonsLoading={lessonsLoading}
-              lessonsError={lessonsError}
-              refetchLessons={refetchLessons}
-              getProgress={(lid) => getProgress(lid)}
-              isDark={isDark}
-              onOpenLesson={handleOpenLesson}
-              onShowTeacherDashboard={() => setScreen('teacher_dashboard')}
-              onShowStudentStats={() => setScreen('student_stats')}
-            />
+                userName={userName} setUserName={setUserName}
+                isGuest={isGuest} setIsGuest={setIsGuest}
+                lessons={lessons} lessonsLoading={lessonsLoading} lessonsError={lessonsError}
+                refetchLessons={refetchLessons} getProgress={getProgress}
+                isDark={isDark} onOpenLesson={handleOpenLesson}
+                onOpenTeacher={() => setScreen('teacher_dashboard')}
+                onOpenAdmin={() => setScreen('assignment_admin')} /* 👈 新增這行 */
+              />
           </motion.div>
         )}
 
@@ -1735,7 +1739,154 @@ function FlippedClassroomApp() {
           </motion.div>
         )}
 
+        {screen === 'assignment_admin' && (
+          <motion.div key="aadmin" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
+            className="w-full flex justify-center">
+            {isTeacher(userName) ? (
+              <AssignmentAdminScreen
+                userName={userName}
+                onBack={() => setScreen('home')}
+                refetchLessons={refetchLessons}
+              />
+            ) : (
+              <div className="glass-panel p-8 rounded-2xl shadow-xl text-center max-w-sm">
+                <i className="fas fa-lock text-4xl text-red-500 mb-4"></i>
+                <button onClick={() => setScreen('home')} className="bg-gray-600 text-white px-6 py-2 rounded-lg">返回</button>
+              </div>
+            )}
+          </motion.div>
+        )}
+
       </AnimatePresence>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * 【區塊 13A】ASSIGNMENT ADMIN SCREEN (發佈新影片任務)
+ * ============================================================================ */
+function AssignmentAdminScreen({ userName, onBack, refetchLessons }) {
+  const toast = useToast();
+  const [creating, setCreating] = useState(false);
+
+  const [topic, setTopic] = useState('必修部分');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [estimatedMin, setEstimatedMin] = useState(10);
+  const [targetForm, setTargetForm] = useState('All'); // 模仿另一個 App 的派發對象
+
+  const handleCreate = async () => {
+    if (!title.trim() || !videoId.trim()) {
+      return toast('請填寫標題和 YouTube 影片 ID', 'warning', 3000);
+    }
+    setCreating(true);
+
+    const payload = {
+      action: 'createLesson',
+      lesson: {
+        id: `lesson_${Date.now()}`,
+        topic,
+        title: title.trim(),
+        description: description.trim(),
+        videoId: videoId.trim(),
+        dueDate,
+        estimatedMin: Number(estimatedMin),
+        targetForm
+      },
+      createdBy: userName
+    };
+
+    try {
+      const res = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (data.success || data.result === 'success') {
+        toast('🎉 影片任務發佈成功！', 'success', 4000);
+        setTitle('');
+        setDescription('');
+        setVideoId('');
+        if (refetchLessons) refetchLessons(); // 自動重整最新課題
+      } else {
+        toast(`發佈失敗：${data.error || '未知錯誤'}`, 'error', 3000);
+      }
+    } catch (err) {
+      toast('發佈發生錯誤，請檢查網路或 GAS 設定', 'error', 3000);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-2xl">
+      <div className="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+        <div className="flex items-center gap-3 mb-5 border-b border-gray-100 dark:border-gray-700 pb-4">
+          <button onClick={onBack} className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i className="fas fa-arrow-left"></i>
+          </button>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
+              <i className="fas fa-bullhorn text-indigo-500 mr-2"></i>發佈新影片任務
+            </h2>
+            <p className="text-xs text-gray-400 dark:text-gray-500">此介面可將影片任務直接發佈至學生的主頁</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">主題 (Topic)</label>
+              <input type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="如：細胞分裂" className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">派送對象 (年級)</label>
+              <select value={targetForm} onChange={e => setTargetForm(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100">
+                <option value="All">全校</option>
+                <option value="4">中四</option>
+                <option value="5">中五</option>
+                <option value="6">中六</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">任務標題 (Title) *</label>
+            <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="如：Ch.24 免疫系統影片" className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">YouTube 影片 ID *</label>
+            <input type="text" value={videoId} onChange={e => setVideoId(e.target.value)} placeholder="如：dQw4w9WgXcQ (v= 後面的代碼)" className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">任務說明 (Description)</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="請學生注意的重點..." rows="3" className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 resize-none"></textarea>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">預計觀看時間 (分鐘)</label>
+              <input type="number" min="1" value={estimatedMin} onChange={e => setEstimatedMin(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">截止日期</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100" />
+            </div>
+          </div>
+          
+          <div className="pt-4 border-t border-gray-100 dark:border-gray-700">
+            <button onClick={handleCreate} disabled={creating} className={`w-full py-3 rounded-xl font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 ${creating ? 'bg-gray-400' : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:scale-[1.02]'}`}>
+              {creating ? <><i className="fas fa-spinner fa-spin"></i> 發佈中...</> : <><i className="fas fa-paper-plane"></i> 確認發佈任務</>}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
