@@ -118,7 +118,7 @@
 /* ============================================================================
  * 【版本檢查系統】
  * ============================================================================ */
-const APP_VERSION       = "2026.05.15.fc.v2";
+const APP_VERSION       = "2026.05.16.fc.v3";
 const VERSION_CHECK_URL = "./version.json";
 const VERSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
@@ -232,12 +232,48 @@ function isOverdue(dateStr) {
   return getHKDateString() > dateStr;
 }
 
+// 解析用戶名格式：「WAN YU FUNG (25-26) 5A28」→ 顯示名 / 班別 / 年級
+function parseUsername(fullName) {
+  if (!fullName) return { displayName: '', form: null, grade: null, number: null };
+  const s = String(fullName).trim();
+  // 格式1：NAME (YY-YY) 5A28   e.g. "WAN YU FUNG (25-26) 5A28"
+  const m1 = s.match(/^(.+?)\s*\(\d{2}-\d{2}\)\s*([4-6][A-Z])(\d+)\s*$/i);
+  if (m1) {
+    return { displayName: m1[1].trim(), form: m1[2].toUpperCase(), grade: m1[2][0], number: m1[3] };
+  }
+  // 格式2：5A28 NAME (YY-YY)   舊格式備援
+  const m2 = s.match(/^([4-6][A-Z])(\d+)\s+(.+?)\s*(?:\(\d{2}-\d{2}\))?\s*$/i);
+  if (m2) {
+    return { displayName: m2[3].trim(), form: m2[1].toUpperCase(), grade: m2[1][0], number: m2[2] };
+  }
+  return { displayName: s, form: null, grade: null, number: null };
+}
+
 function shortenName(fullName) {
   if (!fullName) return '';
-  return String(fullName)
-    .replace(/^\s*[4-6][A-Z]\d+\s*/i, '')
-    .replace(/\s*\([\d\-]+\)(\s*[A-Za-z0-9]+)?\s*$/, '')
-    .trim();
+  return parseUsername(String(fullName)).displayName || String(fullName).trim();
+}
+
+// 取得學生班別（如 "5A"），供任務篩選用
+function parseUserForm(fullName) {
+  return parseUsername(fullName).form; // e.g. "5A" or null
+}
+
+// 判斷該學生班別是否符合任務的派發對象
+function matchesTargetForm(targetForm, userForm) {
+  if (!targetForm || targetForm.trim() === '' || targetForm.trim().toUpperCase() === 'ALL') return true;
+  if (!userForm) return true; // 無法判斷班別→預設顯示
+  const tf = targetForm.trim().toUpperCase();
+  const uf = userForm.trim().toUpperCase();
+  if (tf === uf) return true; // 完全符合，例如 "5A" === "5A"
+  // 只指定年級：「5」「F5」「中五」→ 符合所有 5X 班
+  const gm = tf.match(/^(?:[F中]?)([4-6])$/i);
+  if (gm && uf[0] === gm[1]) return true;
+  // 逗號分隔多班：「5A,5B」
+  if (tf.includes(',')) {
+    return tf.split(',').map(x => x.trim()).some(t => t === uf);
+  }
+  return false;
 }
 
 function normalizeNameForMatch(name) {
@@ -723,8 +759,15 @@ function HomeScreen({
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
 
+  // 學生班別（教師不作篩選）
+  const userForm = !teacher ? parseUserForm(userName) : null;
+
   const filteredLessons = useMemo(() => {
     let list = lessons;
+    // ★ 按班別篩選：只顯示派給自己班別的任務
+    if (!teacher) {
+      list = list.filter(l => matchesTargetForm(l.targetForm, userForm));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(l => l.title.toLowerCase().includes(q) || l.topic.toLowerCase().includes(q));
@@ -735,7 +778,7 @@ function HomeScreen({
       list = list.filter(l => !!getProgress(l.id)?.completedAt);
     }
     return list;
-  }, [lessons, search, filter, getProgress]);
+  }, [lessons, search, filter, getProgress, teacher, userForm]);
 
   const completedCount = useMemo(() =>
     lessons.filter(l => !!getProgress(l.id)?.completedAt).length,
@@ -1558,11 +1601,21 @@ function TeacherDashboardScreen({ lessons, allProgress, onBack, onViewLessonRepo
  * ============================================================================ */
 function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
   const [expandedStudent, setExpandedStudent] = useState(null);
+  const [showTab, setShowTab] = useState('started'); // 'started' | 'not_started'
 
   const progressMap = allProgress?.[lesson.id] || {};
   const studentList = Object.entries(progressMap)
     .map(([name, p]) => ({ name, ...p }))
     .sort((a,b) => (b.watchPct||0) - (a.watchPct||0));
+
+  // 推算同班未開始學生
+  const notStartedStudents = useMemo(() => {
+    const allKnown = new Set();
+    Object.values(allProgress || {}).forEach(lp => Object.keys(lp).forEach(n => allKnown.add(n)));
+    return [...allKnown]
+      .filter(name => matchesTargetForm(lesson.targetForm, parseUserForm(name)))
+      .filter(name => !progressMap[name]);
+  }, [allProgress, lesson.targetForm, progressMap]);
 
   const totalQ     = lesson.questions?.length || 0;
   const avgWatch   = studentList.length > 0
@@ -1587,10 +1640,10 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
 
         <div className="grid grid-cols-4 gap-2 mb-5">
           {[
-            { icon:'👥', label:'已開始',   value: studentList.length, color:'from-blue-500 to-cyan-500' },
+            { icon:'▶️', label:'已點開',   value: studentList.length, color:'from-blue-500 to-cyan-500' },
             { icon:'✅', label:'已完成',   value: completedCount,     color:'from-green-500 to-emerald-500' },
             { icon:'📊', label:'平均觀看', value: fmtPct(avgWatch),   color:'from-indigo-500 to-purple-500' },
-            { icon:'❓', label:'題目數',   value: totalQ,             color:'from-orange-500 to-amber-500' },
+            { icon:'😴', label:'未點開',   value: notStartedStudents.length, color:'from-red-400 to-rose-500' },
           ].map((k,i) => (
             <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-2.5 text-center">
               <div className="text-lg mb-0.5">{k.icon}</div>
@@ -1600,9 +1653,22 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
           ))}
         </div>
 
-        {studentList.length === 0 ? (
-          <EmptyState icon="👥" title="尚無學生開始此課題" subtitle="學生完成觀看後，這裡將顯示詳細的進度報告。" />
-        ) : (
+        {/* Tab 切換 */}
+        <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl mb-4">
+          <button onClick={() => setShowTab('started')}
+            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${showTab === 'started' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>
+            <i className="fas fa-play-circle mr-1"></i>已點開 ({studentList.length})
+          </button>
+          <button onClick={() => setShowTab('not_started')}
+            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${showTab === 'not_started' ? 'bg-white dark:bg-gray-600 text-red-500 dark:text-red-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>
+            <i className="fas fa-eye-slash mr-1"></i>未點開 ({notStartedStudents.length})
+          </button>
+        </div>
+
+        {showTab === 'started' ? (
+          studentList.length === 0 ? (
+            <EmptyState icon="▶️" title="尚無學生點開此課題" subtitle="學生開始觀看後，這裡將顯示詳細的進度報告。" />
+          ) : (
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
               <i className="fas fa-users text-indigo-500"></i>學生進度（按觀看%排序）
@@ -1663,41 +1729,42 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
                     </button>
                   </div>
 
-                  {isExpanded && totalQ > 0 && (
+                  {isExpanded && (
                     <div className="px-4 pb-3 pt-0 border-t border-gray-50 dark:border-gray-700/50">
-                      <div className="mt-2 space-y-1.5">
-                        {lesson.questions.map((q, qi) => {
-                          const ans     = s.answers?.[q.id];
-                          const correct = q.type === 'mcq'
-                            ? ans === String(q.answer)
-                            : ans?.toLowerCase().trim() === q.answer?.toLowerCase().trim();
-                          return (
-                            <div key={q.id} className="flex items-start gap-2 text-xs">
-                              <span className="font-bold text-gray-400 dark:text-gray-500 flex-shrink-0 w-6 text-right">Q{qi+1}</span>
-                              <span className="text-gray-500 dark:text-gray-400 flex-1 min-w-0 truncate" title={q.text}>{q.text}</span>
-                              {ans !== undefined ? (
-                                <span className={`flex-shrink-0 px-2 py-0.5 rounded font-bold ${
-                                  correct
-                                    ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
-                                    : 'bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300'
-                                }`}>
-                                  {q.type === 'mcq' ? `選 ${['A','B','C','D'][parseInt(ans)]}` : ans}
-                                  <i className={`fas ${correct ? 'fa-check' : 'fa-times'} ml-1`}></i>
-                                </span>
-                              ) : (
-                                <span className="flex-shrink-0 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">
-                                  未作答
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
+                      {/* 時間資訊 */}
+                      <div className="mt-2 mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-400 dark:text-gray-500">
+                        {s.startedAt && <span><i className="fas fa-clock mr-1"></i>開始: {new Date(s.startedAt).toLocaleString('zh-HK')}</span>}
+                        {s.completedAt && <span className="text-green-500 dark:text-green-400 font-bold"><i className="fas fa-check-circle mr-1"></i>完成: {new Date(s.completedAt).toLocaleString('zh-HK')}</span>}
                       </div>
-                      {s.completedAt && (
-                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-                          <i className="fas fa-clock mr-1"></i>
-                          完成於 {new Date(s.completedAt).toLocaleString('zh-HK')}
-                        </p>
+                      {totalQ > 0 && (
+                        <div className="mt-2 space-y-1.5">
+                          {lesson.questions.map((q, qi) => {
+                            const ans     = s.answers?.[q.id];
+                            const correct = q.type === 'mcq'
+                              ? ans === String(q.answer)
+                              : ans?.toLowerCase().trim() === q.answer?.toLowerCase().trim();
+                            return (
+                              <div key={q.id} className="flex items-start gap-2 text-xs">
+                                <span className="font-bold text-gray-400 dark:text-gray-500 flex-shrink-0 w-6 text-right">Q{qi+1}</span>
+                                <span className="text-gray-500 dark:text-gray-400 flex-1 min-w-0 truncate" title={q.text}>{q.text}</span>
+                                {ans !== undefined ? (
+                                  <span className={`flex-shrink-0 px-2 py-0.5 rounded font-bold ${
+                                    correct
+                                      ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
+                                      : 'bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300'
+                                  }`}>
+                                    {q.type === 'mcq' ? `選 ${['A','B','C','D'][parseInt(ans)]}` : ans}
+                                    <i className={`fas ${correct ? 'fa-check' : 'fa-times'} ml-1`}></i>
+                                  </span>
+                                ) : (
+                                  <span className="flex-shrink-0 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">
+                                    未作答
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1705,6 +1772,30 @@ function TeacherLessonReportScreen({ lesson, allProgress, onBack }) {
               );
             })}
           </div>
+          )
+        ) : (
+          /* 未點開學生 */
+          notStartedStudents.length === 0 ? (
+            <EmptyState icon="🎉" title="所有已登記學生均已點開！" subtitle="系統只追蹤曾使用過此平台的學生。" />
+          ) : (
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                <i className="fas fa-eye-slash text-red-400"></i>尚未點開此課題 ({notStartedStudents.length} 人)
+              </h3>
+              <p className="text-xs text-gray-400 dark:text-gray-500 italic bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg border border-amber-100 dark:border-amber-800/30">
+                <i className="fas fa-info-circle mr-1"></i>
+                以下學生曾登入過系統，但尚未開始此課題。未曾登入的學生不顯示於此。
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {notStartedStudents.sort().map(name => (
+                  <div key={name} className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-lg px-3 py-2">
+                    <i className="fas fa-user-slash text-red-300 dark:text-red-600 text-xs"></i>
+                    <span className="text-xs font-medium text-red-700 dark:text-red-400 truncate">{shortenName(name)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
         )}
       </div>
     </div>
@@ -1928,17 +2019,26 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
     // 按時間倒序排列，讓最新派發的任務顯示在最上方
     return [...lessons].reverse().map(l => {
       const progressMap = allProgress[l.id] || {};
-      const studentRecords = Object.values(progressMap);
+      const studentRecords = Object.entries(progressMap);
       
-      // 已開始觀看人數 (觀看百分比大於 0)
-      const startedCount = studentRecords.filter(p => (p.watchPct || 0) > 0).length;
-      // 已完成人數 (有完成時間戳，或觀看百分比達到系統設定的 90% 門檻)
-      const completedCount = studentRecords.filter(p => p.completedAt || (p.watchPct >= 90)).length;
+      // 已開始觀看人數
+      const startedCount = studentRecords.filter(([,p]) => (p.watchPct || 0) > 0).length;
+      // 已完成人數
+      const completedCount = studentRecords.filter(([,p]) => p.completedAt || (p.watchPct >= 90)).length;
+
+      // 從全域進度推算「同班同學」（曾登入過的）
+      const allKnown = new Set();
+      Object.values(allProgress || {}).forEach(lp => Object.keys(lp).forEach(n => allKnown.add(n)));
+      const classmates = [...allKnown].filter(name => matchesTargetForm(l.targetForm, parseUserForm(name)));
+      const notStarted = classmates.filter(name => !progressMap[name]);
 
       return {
         lesson: l,
         started: startedCount,
-        completed: completedCount
+        completed: completedCount,
+        progressMap,
+        classmates,
+        notStarted
       };
     });
   }, [lessons, allProgress]);
@@ -1972,17 +2072,18 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
     if (!videoId.trim()) return toast('請輸入或選擇影片 ID', 'warning');
 
     setCreating(true);
+    const lessonId = `lesson_${Date.now()}`;
     const payload = {
       action: 'createLesson',
       lesson: {
-        id: `lesson_${Date.now()}`,
+        id: lessonId,
         topic,
         title: title.trim(),
         description: description.trim(),
         videoId: videoId.trim(),
         dueDate,
         estimatedMin: Number(estimatedMin),
-        targetForm
+        targetForm: targetForm.trim() || 'All'
       },
       createdBy: userName
     };
@@ -1990,22 +2091,36 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
     try {
       const res = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if (data.success || data.result === 'success') {
-        toast('🎉 影片任務發佈成功！', 'success');
+
+      let data = {};
+      try {
+        const text = await res.text();
+        // GAS 有時會回傳 HTML 錯誤頁，要先嘗試 parse JSON
+        data = JSON.parse(text);
+      } catch {
+        // 若無法 parse，視為成功（GAS 有時不回傳 JSON）
+        data = { success: true };
+      }
+
+      if (data.success || data.result === 'success' || data.message) {
+        toast('🎉 影片任務發佈成功！正在重新整理…', 'success');
         setTitle('');
         setDescription('');
         setVideoId('');
         setVideoSelection('');
-        if (refetchLessons) refetchLessons();
+        setDueDate('');
+        setEstimatedMin(10);
+        setTargetForm('All');
+        setTimeout(() => { if (refetchLessons) refetchLessons(); }, 1200);
       } else {
-        toast(`發佈失敗: ${data.error || '未知錯誤'}`, 'error');
+        toast(`發佈失敗: ${data.error || JSON.stringify(data)}`, 'error');
       }
     } catch (e) {
-      toast(`發佈發生錯誤: ${e.message}`, 'error');
+      toast(`網絡錯誤，請檢查連線: ${e.message}`, 'error');
     } finally {
       setCreating(false);
     }
@@ -2110,7 +2225,33 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">派發班級</label>
-                <input type="text" value={targetForm} onChange={e => setTargetForm(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100" />
+                <select value={targetForm} onChange={e => setTargetForm(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm">
+                  <option value="All">全體 (All)</option>
+                  <optgroup label="中四">
+                    <option value="4">中四全年級</option>
+                    <option value="4A">4A</option>
+                    <option value="4B">4B</option>
+                    <option value="4C">4C</option>
+                    <option value="4D">4D</option>
+                    <option value="4E">4E</option>
+                  </optgroup>
+                  <optgroup label="中五">
+                    <option value="5">中五全年級</option>
+                    <option value="5A">5A</option>
+                    <option value="5B">5B</option>
+                    <option value="5C">5C</option>
+                    <option value="5D">5D</option>
+                    <option value="5E">5E</option>
+                  </optgroup>
+                  <optgroup label="中六">
+                    <option value="6">中六全年級</option>
+                    <option value="6A">6A</option>
+                    <option value="6B">6B</option>
+                    <option value="6C">6C</option>
+                    <option value="6D">6D</option>
+                    <option value="6E">6E</option>
+                  </optgroup>
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">截止日期</label>
@@ -2125,7 +2266,7 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
             </div>
           </div>
         ) : (
-          /* ✨ 新增區塊：查看已派發任務的學生完成情況 */
+          /* ✨ 已派發任務：詳細學生追蹤 */
           <div className="space-y-4">
             {lessonStats.length === 0 ? (
               <div className="text-center py-12 text-gray-400 dark:text-gray-500">
@@ -2133,39 +2274,144 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
                 <span>目前系統內尚無已發佈的任務資料</span>
               </div>
             ) : (
-              lessonStats.map(({ lesson, started, completed }) => (
-                <div key={lesson.id} className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm flex flex-col gap-2 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all">
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="min-w-0">
-                      <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">
-                        {lesson.topic}
-                      </span>
-                      <h3 className="font-bold text-gray-800 dark:text-gray-100 mt-1 text-sm md:text-base line-clamp-1">{lesson.title}</h3>
+              lessonStats.map(({ lesson, started, completed, progressMap, classmates, notStarted }) => {
+                const [expanded, setExpanded] = React.useState(false);
+                const totalQ = lesson.questions?.length || 0;
+                const studentList = Object.entries(progressMap)
+                  .map(([name, p]) => ({ name, ...p }))
+                  .sort((a,b) => (b.watchPct||0) - (a.watchPct||0));
+
+                return (
+                  <div key={lesson.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    
+                    {/* 任務標題行 */}
+                    <div className="p-4">
+                      <div className="flex justify-between items-start gap-2 mb-2">
+                        <div className="min-w-0">
+                          <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">
+                            {lesson.topic}
+                          </span>
+                          {lesson.targetForm && lesson.targetForm !== 'All' && (
+                            <span className="ml-1 text-[10px] bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                              <i className="fas fa-users mr-0.5"></i>{lesson.targetForm}
+                            </span>
+                          )}
+                          <h3 className="font-bold text-gray-800 dark:text-gray-100 mt-1 text-sm line-clamp-1">{lesson.title}</h3>
+                        </div>
+                        {lesson.dueDate && (
+                          <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 bg-gray-50 dark:bg-gray-900 px-2 py-1 rounded-md border border-gray-100 dark:border-gray-800">
+                            截止: {lesson.dueDate}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 統計概覽 */}
+                      <div className="grid grid-cols-3 gap-2 mb-2">
+                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-2 text-center">
+                          <div className="text-[10px] text-blue-500 dark:text-blue-400 font-medium"><i className="fas fa-play-circle mr-0.5"></i>已點開</div>
+                          <div className="text-base font-extrabold text-blue-600 dark:text-blue-400">{started}</div>
+                        </div>
+                        <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-2 text-center">
+                          <div className="text-[10px] text-green-500 dark:text-green-400 font-medium"><i className="fas fa-check-circle mr-0.5"></i>已完成</div>
+                          <div className="text-base font-extrabold text-green-600 dark:text-green-400">{completed}</div>
+                        </div>
+                        <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-2 text-center">
+                          <div className="text-[10px] text-red-500 dark:text-red-400 font-medium"><i className="fas fa-eye-slash mr-0.5"></i>未點開</div>
+                          <div className="text-base font-extrabold text-red-500 dark:text-red-400">{notStarted.length}</div>
+                        </div>
+                      </div>
+
+                      {/* 展開詳細追蹤按鈕 */}
+                      <button
+                        onClick={() => setExpanded(e => !e)}
+                        className="w-full text-xs py-1.5 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-300 transition-all font-bold flex items-center justify-center gap-1"
+                      >
+                        <i className={`fas fa-chevron-${expanded ? 'up' : 'down'} text-[10px]`}></i>
+                        {expanded ? '收起詳情' : `查看詳細學生追蹤 (${studentList.length + notStarted.length} 人)`}
+                      </button>
                     </div>
-                    {lesson.dueDate && (
-                      <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 bg-gray-50 dark:bg-gray-900 px-2 py-1 rounded-md border border-gray-100 dark:border-gray-800">
-                        截止: {lesson.dueDate}
-                      </span>
+
+                    {/* 詳細學生列表（可展開） */}
+                    {expanded && (
+                      <div className="border-t border-gray-100 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700/50">
+                        
+                        {/* 已開始的學生 */}
+                        {studentList.length > 0 && (
+                          <div className="p-3">
+                            <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 mb-2 flex items-center gap-1">
+                              <i className="fas fa-play-circle text-blue-400"></i>已點開 / 進行中 ({studentList.length})
+                            </p>
+                            <div className="space-y-1.5">
+                              {studentList.map(s => {
+                                const answered = s.answers ? Object.keys(s.answers).length : 0;
+                                const statusIcon = s.completedAt ? '✅' : s.watchPct >= 80 ? '▶️' : '👁️';
+                                const statusColor = s.completedAt
+                                  ? 'border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-900/10'
+                                  : 'border-gray-100 dark:border-gray-700/50 bg-white dark:bg-gray-800/50';
+                                return (
+                                  <div key={s.name} className={`rounded-lg border px-3 py-2 ${statusColor}`}>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm">{statusIcon}</span>
+                                      <span className="text-xs font-bold text-gray-700 dark:text-gray-200 flex-1 truncate">
+                                        {shortenName(s.name)}
+                                      </span>
+                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        {/* 觀看進度條 */}
+                                        <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                                          <div className={`h-full rounded-full ${watchPctBg(s.watchPct)}`} style={{ width: fmtPct(s.watchPct) }} />
+                                        </div>
+                                        <span className={`text-[10px] font-bold w-8 text-right ${watchPctColor(s.watchPct)}`}>
+                                          {fmtPct(s.watchPct)}
+                                        </span>
+                                        {totalQ > 0 && (
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${answered >= totalQ ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                                            題{answered}/{totalQ}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {s.startedAt && (
+                                      <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 pl-6">
+                                        開始: {new Date(s.startedAt).toLocaleString('zh-HK', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}
+                                        {s.completedAt && <span className="ml-2 text-green-500 dark:text-green-400 font-bold">· 完成: {new Date(s.completedAt).toLocaleString('zh-HK', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 未開始的學生 */}
+                        {notStarted.length > 0 && (
+                          <div className="p-3 bg-red-50/30 dark:bg-red-900/10">
+                            <p className="text-[11px] font-bold text-red-400 dark:text-red-500 mb-2 flex items-center gap-1">
+                              <i className="fas fa-eye-slash text-red-400"></i>未點開 ({notStarted.length})
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {notStarted.map(name => (
+                                <span key={name} className="text-[11px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full font-medium border border-red-200 dark:border-red-800/50">
+                                  {shortenName(name)}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 italic">
+                              * 只顯示曾使用過系統的同班同學，未登入的學生不在此列
+                            </p>
+                          </div>
+                        )}
+
+                        {studentList.length === 0 && notStarted.length === 0 && (
+                          <div className="p-4 text-center text-xs text-gray-400 dark:text-gray-500">
+                            <i className="fas fa-hourglass-half mr-1"></i>尚未有學生開始此任務
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
-                  
-                  {/* 完成與觀看人數數據統計面板 */}
-                  <div className="grid grid-cols-2 gap-3 mt-1 bg-gray-50 dark:bg-gray-900/40 p-3 rounded-lg border border-gray-100 dark:border-gray-800/60 text-center">
-                    <div>
-                      <div className="text-[11px] text-gray-400 dark:text-gray-500 font-medium">
-                        <i className="fas fa-play-circle text-blue-400 mr-1"></i>已點開學生
-                      </div>
-                      <div className="text-base font-extrabold text-blue-500 dark:text-blue-400 mt-0.5">{started} 人</div>
-                    </div>
-                    <div className="border-l border-gray-200 dark:border-gray-700">
-                      <div className="text-[11px] text-gray-400 dark:text-gray-500 font-medium">
-                        <i className="fas fa-check-circle text-green-400 mr-1"></i>已完成任務
-                      </div>
-                      <div className="text-base font-extrabold text-green-500 dark:text-green-400 mt-0.5">{completed} 人</div>
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
