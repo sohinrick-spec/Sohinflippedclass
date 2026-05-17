@@ -650,43 +650,55 @@ function useGoogleSignIn(userName, setUserName, enabled = true) {
  * 【區塊 6A】useLessons
  * ============================================================================ */
 function useLessons() {
-  const [lessons, setLessons]     = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error,   setError]       = useState(null);
+  const CACHE_KEY = 'fc_lessons_v1';
+  const STALE_MS  = 3 * 60 * 1000;
 
-  const fetchLessons = useCallback(async () => {
-    setLoading(true);
+  function readCache() {
+    try { const r = localStorage.getItem(CACHE_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
+  }
+
+  const boot = readCache();
+  const [lessons,  setLessons]  = useState(boot?.data || []);
+  const [loading,  setLoading]  = useState(!boot?.data?.length);
+  const [syncing,  setSyncing]  = useState(false);
+  const [error,    setError]    = useState(null);
+
+  const fetchLessons = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true); else setSyncing(true);
     setError(null);
 
     if (!isScriptConfigured()) {
       setLessons(DUMMY_LESSONS);
-      setError(null);
-      setLoading(false);
+      setLoading(false); setSyncing(false);
       return;
     }
 
     try {
-      const res  = await fetch(
-        `${CONFIG.GOOGLE_SCRIPT_URL}?action=getLessons&t=${Date.now()}`
-      );
+      const res  = await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?action=getLessons`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-
       if (data.error) throw new Error(data.error);
       const fetched = Array.isArray(data.lessons) ? data.lessons : [];
-      setLessons(fetched.length > 0 ? fetched : DUMMY_LESSONS);
+      const result  = fetched.length > 0 ? fetched : DUMMY_LESSONS;
+      setLessons(result);
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: result, ts: Date.now() })); } catch {}
     } catch (e) {
-      setLessons(DUMMY_LESSONS);
+      if (!readCache()?.data?.length) setLessons(DUMMY_LESSONS);
       setError(`⚠️ 無法連接 Google Sheet，目前顯示示範數據。(${e.message})`);
     } finally {
-      setLoading(false);
+      setLoading(false); setSyncing(false);
     }
   }, []);
 
-  useEffect(() => { fetchLessons(); }, [fetchLessons]);
+  useEffect(() => {
+    const c = readCache();
+    if (!c?.data?.length) { fetchLessons(false); return; }
+    if (Date.now() - (c.ts || 0) > STALE_MS) fetchLessons(true);
+  }, [fetchLessons]);
 
-  return { lessons, loading, error, refetchLessons: fetchLessons };
+  return { lessons, loading, syncing, error, refetchLessons: () => fetchLessons(false) };
 }
+
 
 /* ============================================================================
  * 【★ 新增】useRegisteredUsers — 取得所有曾登入用戶
@@ -736,31 +748,16 @@ function useRegisteredUsers(userName) {
 function useProgressData(userName) {
   const [allProgress, setAllProgress] = useState(null);
   const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState(null);
+  const [error,   setError]   = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const fetchProgress = useCallback(async () => {
     if (!userName || userName === '訪客 (未登入)') return;
-    setLoading(true);
     setError(null);
 
-    if (isScriptConfigured()) {
-      try {
-        const res  = await fetch(
-          `${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress&t=${Date.now()}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          if (data.progress && !data.error) {
-            setAllProgress(data.progress);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch (e) { /* GAS 失敗，降級到 localStorage */ }
-    }
-
+    // ★ 第一步：立即從 localStorage 顯示（零等待）
+    const localResult = {};
     try {
-      const result = {};
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(CONFIG.STORAGE.progress)) continue;
@@ -771,16 +768,34 @@ function useProgressData(userName) {
         const studentName = rest.slice(sepIdx + 1);
         try {
           const val = JSON.parse(localStorage.getItem(k));
-          if (!result[lessonId]) result[lessonId] = {};
-          result[lessonId][studentName] = val;
-        } catch { /* 略過損壞項目 */ }
+          if (!localResult[lessonId]) localResult[lessonId] = {};
+          localResult[lessonId][studentName] = val;
+        } catch {}
       }
-      const hasSomeLocalData = Object.keys(result).length > 0;
-      setAllProgress(hasSomeLocalData ? result : { ...DUMMY_PROGRESS, ...result });
-    } catch (e) {
-      setAllProgress(DUMMY_PROGRESS);
-      setError(e.message);
+    } catch {}
+    const hasLocal = Object.keys(localResult).length > 0;
+    if (hasLocal) { setAllProgress(localResult); setLoading(false); }
+    else setLoading(true);
+
+    // ★ 第二步：背景從 GAS 獲取完整資料
+    if (isScriptConfigured()) {
+      setSyncing(true);
+      try {
+        const res = await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.progress && !data.error) {
+            setAllProgress(data.progress);
+            setLoading(false);
+            setSyncing(false);
+            return;
+          }
+        }
+      } catch {}
+      setSyncing(false);
     }
+
+    if (!hasLocal) setAllProgress(DUMMY_PROGRESS);
     setLoading(false);
   }, [userName]);
 
@@ -827,7 +842,7 @@ function useProgressData(userName) {
     return loadLocalProgress(lessonId, name || userName);
   }, [allProgress, userName]);
 
-  return { allProgress, loading, error, submitProgress, getProgress, refetch: fetchProgress };
+  return { allProgress, loading, syncing, error, submitProgress, getProgress, refetch: fetchProgress };
 }
 
 /* ============================================================================
@@ -1328,7 +1343,9 @@ function HomeScreen({
   getProgress, allProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin,
   previewStudent,
   setPreviewStudent,
-  registeredUsers
+  registeredUsers,
+  lessonsSyncing = false,
+  progressSyncing = false
 }) {
   const teacher = previewStudent ? false : isTeacher(userName);
   useGoogleSignIn(userName, setUserName, !previewStudent);
@@ -1850,6 +1867,16 @@ if (teacher) {
               <button onClick={refetchLessons} className="text-xs text-amber-600 font-bold">
                 <i className="fas fa-rotate-right"></i>
               </button>
+            </div>
+          )}
+
+          {(lessonsSyncing || progressSyncing) && (
+            <div className="mb-3 p-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/30 rounded-xl flex items-center gap-2 text-xs text-indigo-400 dark:text-indigo-500">
+              <i className="fas fa-spinner fa-spin text-[10px] flex-shrink-0"></i>
+              <span className="flex-1">後台同步中，資料將自動更新…</span>
+              <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/50 px-1.5 py-0.5 rounded-full font-bold">
+                {lessonsSyncing && progressSyncing ? '課題＋進度' : lessonsSyncing ? '課題' : '進度'}
+              </span>
             </div>
           )}
 
@@ -3085,11 +3112,11 @@ const [activeLesson, setActiveLesson] = useState(null);
 /* ★ 新增：教師預覽學生模式 */
 const [previewStudent, setPreviewStudent] = useState(null);
 
-  const { lessons, loading: lessonsLoading, error: lessonsError, refetchLessons } = useLessons();
+  const { lessons, loading: lessonsLoading, error: lessonsError, syncing: lessonsSyncing, refetchLessons } = useLessons();
   /* ★ 教師預覽學生時，整個系統改用學生身份 */
   const effectiveUserName = previewStudent || userName;
   window.__PREVIEW_STUDENT_MODE__ = !!previewStudent;
-  const { allProgress, loading, error, submitProgress, getProgress, refetch } =
+  const { allProgress, loading, error, submitProgress, getProgress, refetch, syncing: progressSyncing } =
     useProgressData(effectiveUserName);
   const { users: registeredUsers, refetchUsers } = useRegisteredUsers(userName);
 
@@ -3162,10 +3189,11 @@ const [previewStudent, setPreviewStudent] = useState(null);
               isDark={isDark} onOpenLesson={handleOpenLesson}
               onOpenTeacher={() => setScreen('teacher_dashboard')}
               onOpenAdmin={() => setScreen('assignment_admin')}
-
               previewStudent={previewStudent}
               setPreviewStudent={setPreviewStudent}
               registeredUsers={registeredUsers}
+              lessonsSyncing={lessonsSyncing}
+              progressSyncing={progressSyncing}
             />
           </motion.div>
         )}
