@@ -91,6 +91,12 @@
     }
     .pulse-ring { animation: pulse-ring 2s infinite; }
 
+    @keyframes breathe-glow {
+      0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.25); }
+      50%     { box-shadow: 0 0 0 9px rgba(239,68,68,0), 0 0 22px rgba(239,68,68,0.35); }
+    }
+    .breathe-glow { animation: breathe-glow 2.4s ease-in-out infinite; }
+
     @keyframes slideDownBanner {
       from { transform:translateY(-100%); opacity:0; }
       to   { transform:translateY(0);     opacity:1; }
@@ -1057,7 +1063,7 @@ function FocusTaskCard({ lesson, progress, onClick }) {
       whileHover={{ scale: 1.01 }}
       whileTap={{ scale: 0.99 }}
       onClick={onClick}
-      className={`w-full text-left rounded-2xl bg-gradient-to-br ${urgencyColor} text-white p-4 shadow-lg relative overflow-hidden`}
+      className={`w-full text-left rounded-2xl bg-gradient-to-br ${urgencyColor} text-white p-4 shadow-lg relative overflow-hidden${(soon || overdue) ? ' breathe-glow' : ''}`}
     >
       <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-12 translate-x-12 blur-2xl"></div>
       <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full translate-y-8 -translate-x-8 blur-xl"></div>
@@ -1544,16 +1550,33 @@ if (teacher) {
               </div>
             </div>
 
-            <button
-              onClick={() => {
-                setUserName('');
-                localStorage.removeItem(CONFIG.STORAGE.username);
-              }}
-              className="text-xs text-white/80 hover:text-white flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10"
-            >
-              <i className="fas fa-sign-out-alt"></i>
-              登出
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  const students = registeredUsers.filter(n => n && !isTeacher(n) && parseUsername(n).form);
+                  if (previewStudent) {
+                    setPreviewStudent(null);
+                  } else if (students.length > 0) {
+                    setPreviewStudent(students[0]);
+                  }
+                }}
+                title={previewStudent ? `學生視角：${shortenName(previewStudent)}` : '切換為學生視角'}
+                className={`text-xs flex items-center gap-1 px-2 py-1 rounded-lg transition-all ${previewStudent ? 'bg-amber-400 text-amber-900 font-bold' : 'bg-white/10 text-white/80 hover:text-white'}`}
+              >
+                <i className="fas fa-user-graduate"></i>
+                {previewStudent ? `${shortenName(previewStudent)}` : '學生視角'}
+              </button>
+              <button
+                onClick={() => {
+                  setUserName('');
+                  localStorage.removeItem(CONFIG.STORAGE.username);
+                }}
+                className="text-xs text-white/80 hover:text-white flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10"
+              >
+                <i className="fas fa-sign-out-alt"></i>
+                登出
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1828,8 +1851,8 @@ if (teacher) {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                      <span className="w-1 h-5 bg-gradient-to-b from-indigo-500 to-purple-500 rounded-full"></span>
-                      待辦任務
+                      <span className="text-base mr-0.5">🚨</span>
+                      即將到期
                     </h3>
                   </div>
                   <PendingTasksSection
@@ -1858,8 +1881,8 @@ if (teacher) {
               {!lessonsLoading && completedCount > 0 && (
                 <div>
                   <h3 className="font-bold text-gray-700 dark:text-gray-200 mb-3 flex items-center gap-2">
-                    <span className="w-1 h-5 bg-gradient-to-b from-green-400 to-emerald-500 rounded-full"></span>
-                    已完成任務 ({completedCount})
+                    <span className="text-base mr-0.5">✅</span>
+                    已完成 ({completedCount})
                   </h3>
                   <div className="space-y-2">
                     {visibleLessons
@@ -2023,6 +2046,34 @@ if (teacher) {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {!lessonsLoading && freeCount > 0 && (
+                <div>
+                  <h3 className="font-bold text-gray-700 dark:text-gray-200 mb-2 flex items-center gap-2">
+                    <span className="text-base">🍿</span>自由觀看
+                    <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded-full">{freeCount}</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {visibleLessons.filter(l => !isAssignedLesson(l)).slice(0, 5).map(lesson => (
+                      <button key={lesson.id} onClick={() => onOpenLesson(lesson)}
+                        className="w-full text-left rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800 px-3 py-2.5 flex items-center gap-2.5 transition-all hover:bg-purple-50 dark:hover:bg-purple-900/10">
+                        <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center flex-shrink-0 text-sm">🍿</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-700 dark:text-gray-200 text-sm truncate">{lesson.title}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{lesson.estimatedMin > 0 ? `${lesson.estimatedMin} 分鐘` : '自由觀看'}</p>
+                        </div>
+                        <i className="fas fa-chevron-right text-gray-300 dark:text-gray-600 text-xs"></i>
+                      </button>
+                    ))}
+                    {freeCount > 5 && (
+                      <button onClick={() => { setActiveTab('library'); setFilter('free'); }}
+                        className="w-full text-center text-xs text-indigo-500 font-bold py-2 hover:underline">
+                        查看全部 {freeCount} 部 →
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2827,6 +2878,32 @@ function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBac
     : 0;
   const completedCount = studentList.filter(s => s.completedAt).length;
 
+  function exportCSV() {
+    const headers = ['姓名', '班別', '觀看%', '已完成', '作答數', '開始時間', '完成時間'];
+    const rows = [
+      ...studentList.map(s => [
+        shortenName(s.name),
+        parseUserForm(s.name) || '',
+        Math.round(s.watchPct || 0),
+        s.completedAt ? '是' : '否',
+        s.answers ? Object.keys(s.answers).length : 0,
+        s.startedAt ? new Date(s.startedAt).toLocaleString('zh-HK') : '',
+        s.completedAt ? new Date(s.completedAt).toLocaleString('zh-HK') : '',
+      ]),
+      ...notStartedStudents.map(name => [
+        shortenName(name),
+        parseUserForm(name) || '',
+        0, '否', 0, '未點開', '',
+      ]),
+    ];
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${lesson.title}_進度.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="w-full max-w-4xl">
       <div className="glass-panel rounded-3xl shadow-xl overflow-hidden flex flex-col" style={{ maxHeight: '94vh' }}>
@@ -2864,6 +2941,13 @@ function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBac
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6">
+          <div className="flex justify-end mb-2">
+            <button onClick={exportCSV}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-green-50 hover:border-green-300 hover:text-green-700 transition-all font-bold">
+              <i className="fas fa-file-csv text-green-500"></i>匯出 CSV
+            </button>
+          </div>
+
           <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl mb-4">
             <button onClick={() => setShowTab('started')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${showTab === 'started' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>
