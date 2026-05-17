@@ -169,7 +169,7 @@
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-presets="react,env">
+<script type="text/babel">
 
 /* ============================================================================
  * 【版本檢查系統】
@@ -182,7 +182,7 @@ window.__APP_STATE__ = { gameState: 'home' };
 
 async function checkForUpdate() {
   try {
-    const res = await fetch(`${VERSION_CHECK_URL}?t=${Date.now()}`, { cache:'no-store' });
+    const res = await fetch(`${VERSION_CHECK_URL}?action=getLessons`, { cache:'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     if (data.version && data.version !== APP_VERSION) showUpdatePrompt(data.version, data.releaseNote);
@@ -872,7 +872,7 @@ function LessonCard({ lesson, progress, onClick }) {
 
   return (
     <motion.button
-      whileHover={{ y: -2 }}
+      whileHover={false}
       whileTap={{ scale: 0.99 }}
       onClick={onClick}
       className={`w-full text-left bg-white dark:bg-gray-800 border rounded-2xl overflow-hidden card-elevation transition-all ${
@@ -1306,7 +1306,11 @@ function PendingTasksSection({ lessons, userForm, getProgress, onOpenLesson }) {
 function HomeScreen({
   userName, setUserName, isGuest, setIsGuest,
   lessons, lessonsLoading, lessonsError, refetchLessons,
-  getProgress, allProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin
+  getProgress, allProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin,
+
+  previewStudent,
+  setPreviewStudent,
+  registeredUsers
 }) {
   const teacher = isTeacher(userName);
   useGoogleSignIn(userName, setUserName);
@@ -1488,140 +1492,151 @@ function HomeScreen({
   }
 
   /* ★★★ 修復 4：教師主頁重新設計 — 緊湊布局，所有區塊完整顯示 ★★★ */
-  if (teacher) {
-    const teacherAssignedCount = lessons.filter(l => isAssignedLesson(l)).length;
+if (teacher) {
+  const teacherAssignedCount = lessons.filter(
+    l => isAssignedLesson(l)
+  ).length;
 
-    return (
-      <div className="w-full max-w-2xl">
-        <div className="glass-panel rounded-3xl shadow-xl overflow-hidden flex flex-col" style={{ maxHeight: '94vh' }}>
-          {/* 緊湊 Hero Header */}
-          <div className="hero-gradient px-5 py-4 text-white relative flex-shrink-0">
-            <div className="flex items-center justify-between relative">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
-                  <span className="font-bold text-base">{getInitials(userName)}</span>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] text-white/80">{greeting.text}{greeting.emoji}</p>
-                  <h2 className="font-bold text-base truncate flex items-center gap-1.5">
-                    {shortenName(userName)}
-                    <span className="text-[10px] bg-amber-500 px-1.5 py-0.5 rounded-full font-bold">老師</span>
-                  </h2>
-                </div>
-              </div>
-              <button onClick={() => { setUserName(''); localStorage.removeItem(CONFIG.STORAGE.username); }}
-                className="text-xs text-white/80 hover:text-white flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10">
-                <i className="fas fa-sign-out-alt"></i>登出
-              </button>
-            </div>
-          </div>
+  return (
+    <div className="w-full max-w-2xl">
+      <div
+        className="glass-panel rounded-3xl shadow-xl overflow-hidden flex flex-col"
+        style={{ maxHeight: '94vh' }}
+      >
 
-          {/* Content - 可滾動 */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-5">
-            {lessonsError && (
-              <div className="mb-3 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl flex items-center gap-2">
-                <i className="fas fa-wifi text-amber-500"></i>
-                <p className="text-xs text-amber-700 dark:text-amber-300 flex-1">{lessonsError}</p>
-                <button onClick={refetchLessons} className="text-amber-600 text-xs"><i className="fas fa-rotate-right"></i></button>
-              </div>
-            )}
-
-            {/* 統計卡片 */}
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              <div className="bg-gradient-to-br from-indigo-500 to-purple-500 text-white rounded-xl p-3 text-center">
-                <div className="text-[10px] text-white/80">已派發任務</div>
-                <div className="text-2xl font-extrabold mt-0.5">{teacherAssignedCount}</div>
-              </div>
-              <div className="bg-gradient-to-br from-blue-500 to-cyan-500 text-white rounded-xl p-3 text-center">
-                <div className="text-[10px] text-white/80">影片總數</div>
-                <div className="text-2xl font-extrabold mt-0.5">{lessons.length}</div>
-              </div>
-              <div className="bg-gradient-to-br from-amber-500 to-orange-500 text-white rounded-xl p-3 text-center">
-                <div className="text-[10px] text-white/80">已觀看影片</div>
-                <div className="text-2xl font-extrabold mt-0.5">
-                  {lessons.filter(l => Object.keys(allProgress?.[l.id] || {}).length > 0).length}
-                </div>
-              </div>
-            </div>
-
-            {/* 教師工具列 - 緊湊雙欄 */}
-            <h3 className="font-bold text-gray-700 dark:text-gray-200 mb-2 flex items-center gap-2 text-sm">
-              <i className="fas fa-toolbox text-indigo-500"></i>
-              教師工具
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-4">
-              <button onClick={onOpenTeacher}
-                className="group bg-gradient-to-br from-amber-500 to-orange-500 text-white p-3.5 rounded-xl shadow hover:shadow-lg transition-all hover:-translate-y-0.5 text-left">
-                <div className="flex items-center justify-between mb-1">
-                  <i className="fas fa-chalkboard-teacher text-xl"></i>
-                  <i className="fas fa-arrow-right opacity-60 group-hover:translate-x-1 transition-transform text-xs"></i>
-                </div>
-                <h4 className="font-bold text-sm mt-1.5">教師儀表板</h4>
-                <p className="text-[11px] text-white/85 mt-0.5">查看全班觀看與答題</p>
-              </button>
-
-              <button onClick={onOpenAdmin}
-                className="group bg-gradient-to-br from-indigo-500 to-blue-500 text-white p-3.5 rounded-xl shadow hover:shadow-lg transition-all hover:-translate-y-0.5 text-left">
-                <div className="flex items-center justify-between mb-1">
-                  <i className="fas fa-bullhorn text-xl"></i>
-                  <i className="fas fa-arrow-right opacity-60 group-hover:translate-x-1 transition-transform text-xs"></i>
-                </div>
-                <h4 className="font-bold text-sm mt-1.5">發佈影片任務</h4>
-                <p className="text-[11px] text-white/85 mt-0.5">建立新課題並指派班級</p>
-              </button>
-            </div>
-
-            {/* 已派發課題列表（教師預覽） */}
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2 text-sm">
-                <i className="fas fa-list text-indigo-500"></i>
-                已派發課題
-                <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 px-1.5 rounded-full font-bold">
-                  {teacherAssignedCount}
+        {/* Header */}
+        <div className="hero-gradient px-5 py-4 text-white relative flex-shrink-0">
+          <div className="flex items-center justify-between relative">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
+                <span className="font-bold text-base">
+                  {getInitials(userName)}
                 </span>
-              </h3>
-              <button onClick={refetchLessons}
-                className="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-200">
-                <i className={`fas fa-rotate-right text-xs ${lessonsLoading ? 'fa-spin' : ''}`}></i>
-              </button>
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-[11px] text-white/80">
+                  {greeting.text}{greeting.emoji}
+                </p>
+
+                <h2 className="font-bold text-base truncate flex items-center gap-1.5">
+                  {shortenName(userName)}
+
+                  <span className="text-[10px] bg-amber-500 px-1.5 py-0.5 rounded-full font-bold">
+                    老師
+                  </span>
+                </h2>
+              </div>
             </div>
 
-            {lessonsLoading ? (
-              <LessonSkeletonList />
-            ) : teacherAssignedCount === 0 ? (
-              <EmptyState
-                icon="📭"
-                title="尚未派發任何任務"
-                subtitle="點擊上方「發佈影片任務」開始建立"
-              />
-            ) : (
-              <div className="space-y-2.5 pb-2">
-                {lessons.filter(l => isAssignedLesson(l)).slice(0, 6).map(lesson => (
-                  <LessonCard
-                    key={lesson.id}
-                    lesson={lesson}
-                    progress={getProgress(lesson.id)}
-                    onClick={() => onOpenLesson(lesson)}
-                  />
-                ))}
-                {teacherAssignedCount > 6 && (
-                  <button onClick={onOpenTeacher}
-                    className="w-full py-2.5 text-xs text-indigo-500 hover:text-indigo-600 font-bold border border-dashed border-indigo-200 dark:border-indigo-800 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors">
-                    還有 {teacherAssignedCount - 6} 個課題，前往教師儀表板查看 →
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="text-center text-[10px] text-gray-300 dark:text-gray-600 py-2 border-t border-gray-100 dark:border-gray-700 flex-shrink-0">
-            v{APP_VERSION}
+            <button
+              onClick={() => {
+                setUserName('');
+                localStorage.removeItem(CONFIG.STORAGE.username);
+              }}
+              className="text-xs text-white/80 hover:text-white flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10"
+            >
+              <i className="fas fa-sign-out-alt"></i>
+              登出
+            </button>
           </div>
         </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-5">
+
+          {/* 統計卡 */}
+          <div className="grid grid-cols-3 gap-2 mb-4">
+
+            <div className="bg-gradient-to-br from-indigo-500 to-purple-500 text-white rounded-xl p-3 text-center">
+              <div className="text-[10px] text-white/80">
+                已派發任務
+              </div>
+
+              <div className="text-2xl font-extrabold mt-0.5">
+                {teacherAssignedCount}
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-blue-500 to-cyan-500 text-white rounded-xl p-3 text-center">
+              <div className="text-[10px] text-white/80">
+                影片總數
+              </div>
+
+              <div className="text-2xl font-extrabold mt-0.5">
+                {lessons.length}
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-amber-500 to-orange-500 text-white rounded-xl p-3 text-center">
+              <div className="text-[10px] text-white/80">
+                已觀看影片
+              </div>
+
+              <div className="text-2xl font-extrabold mt-0.5">
+                {
+                  lessons.filter(
+                    l => Object.keys(allProgress?.[l.id] || {}).length > 0
+                  ).length
+                }
+              </div>
+            </div>
+
+          </div>
+
+          {/* 工具列 */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4">
+
+            <button
+              onClick={onOpenTeacher}
+              className="group bg-gradient-to-br from-amber-500 to-orange-500 text-white p-3.5 rounded-xl shadow hover:shadow-lg transition-all text-left"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <i className="fas fa-chalkboard-teacher text-xl"></i>
+
+                <i className="fas fa-arrow-right opacity-60 text-xs"></i>
+              </div>
+
+              <h4 className="font-bold text-sm mt-1.5">
+                教師儀表板
+              </h4>
+
+              <p className="text-[11px] text-white/85 mt-0.5">
+                查看全班觀看與答題
+              </p>
+            </button>
+
+            <button
+              onClick={onOpenAdmin}
+              className="group bg-gradient-to-br from-indigo-500 to-blue-500 text-white p-3.5 rounded-xl shadow hover:shadow-lg transition-all text-left"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <i className="fas fa-bullhorn text-xl"></i>
+
+                <i className="fas fa-arrow-right opacity-60 text-xs"></i>
+              </div>
+
+              <h4 className="font-bold text-sm mt-1.5">
+                發佈影片任務
+              </h4>
+
+              <p className="text-[11px] text-white/85 mt-0.5">
+                建立新課題並指派班級
+              </p>
+            </button>
+
+          </div>
+
+        </div>
+
+        <div className="text-center text-[10px] text-gray-300 dark:text-gray-600 py-2 border-t border-gray-100 dark:border-gray-700 flex-shrink-0">
+          v{APP_VERSION}
+        </div>
+
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   // 學生主頁
   const overallPct = totalAssignedLessons > 0 ? Math.round((completedCount / totalAssignedLessons) * 100) : 0;
@@ -1814,7 +1829,7 @@ function HomeScreen({
                 />
               ) : (
                 <div className="space-y-3">
-                  {sortedTopicEntries.map(([topic, topicLessons]) => {
+                  {sortedTopicEntries.slice(0, 12).map(([topic, topicLessons]) => {
                     const done = topicLessons.filter(l => !!getProgress(l.id)?.completedAt).length;
                     const isOpen = openTopics[topic];
                     return (
@@ -2329,6 +2344,7 @@ function TeacherDashboardScreen({ lessons, allProgress, registeredUsers, onBack,
   const assignedLessons = useMemo(() => lessons.filter(l => isAssignedLesson(l)), [lessons]);
 
   const lessonStats = useMemo(() => {
+      const progressEntries = Object.entries(allProgress || {});
     return assignedLessons.map(lesson => {
       const progressMap = allProgress?.[lesson.id] || {};
       const students    = Object.entries(progressMap);
@@ -2737,11 +2753,16 @@ function FlippedClassroomApp() {
   const [isDark, setIsDark]     = useState(() => localStorage.getItem(CONFIG.STORAGE.darkMode) === 'true');
 
   const [screen, setScreen] = useState('home');
-  const [activelesson, setActiveLesson] = useState(null);
+const [activeLesson, setActiveLesson] = useState(null);
+
+/* ★ 新增：教師預覽學生模式 */
+const [previewStudent, setPreviewStudent] = useState(null);
 
   const { lessons, loading: lessonsLoading, error: lessonsError, refetchLessons } = useLessons();
+  /* ★ 教師預覽學生時，整個系統改用學生身份 */
+  const effectiveUserName = previewStudent || userName;
   const { allProgress, loading, error, submitProgress, getProgress, refetch } =
-    useProgressData(userName);
+    useProgressData(effectiveUserName);
   const { users: registeredUsers, refetchUsers } = useRegisteredUsers(userName);
 
   /* ★ 修復 1：用戶恢復登入狀態時也註冊一次 */
@@ -2787,7 +2808,9 @@ function FlippedClassroomApp() {
   }, [error]);
 
   // 計算當前課題是否為派發任務
-  const currentIsAssignment = activelesson ? isAssignmentForUser(activelesson, userName) : false;
+  const currentIsAssignment = activeLesson
+  ? isAssignmentForUser(activeLesson, effectiveUserName)
+  : false;
 
   return (
     <div className={`min-h-screen transition-colors ${isDark ? 'dark bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50/30 to-blue-50'} flex items-start justify-center p-3 md:p-6 pt-4`}>
@@ -2803,7 +2826,7 @@ function FlippedClassroomApp() {
           <motion.div key="home" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-20}}
             className="w-full flex justify-center">
             <HomeScreen
-              userName={userName} setUserName={setUserName}
+              userName={effectiveUserName} setUserName={setUserName}
               isGuest={isGuest} setIsGuest={setIsGuest}
               lessons={lessons} lessonsLoading={lessonsLoading} lessonsError={lessonsError}
               refetchLessons={refetchLessons} getProgress={getProgress}
@@ -2811,6 +2834,10 @@ function FlippedClassroomApp() {
               isDark={isDark} onOpenLesson={handleOpenLesson}
               onOpenTeacher={() => setScreen('teacher_dashboard')}
               onOpenAdmin={() => setScreen('assignment_admin')}
+
+              previewStudent={previewStudent}
+              setPreviewStudent={setPreviewStudent}
+              registeredUsers={registeredUsers}
             />
           </motion.div>
         )}
