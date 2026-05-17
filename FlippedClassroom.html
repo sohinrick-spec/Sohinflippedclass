@@ -181,7 +181,7 @@
  * 【版本檢查系統】
  * ============================================================================ */
 const APP_VERSION       = "2026.05.17.fc.v5";
-const VERSION_CHECK_URL = "./version.json";
+const VERSION_CHECK_URL = null;
 const VERSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
 window.__APP_STATE__ = { gameState: 'home' };
@@ -220,9 +220,7 @@ function showUpdatePrompt(newVersion, releaseNote) {
   document.getElementById('fc-update-later').onclick = () => banner.remove();
 }
 
-setTimeout(checkForUpdate, 30000);
-setInterval(checkForUpdate, VERSION_CHECK_INTERVAL);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+// 版本檢查已停用（單一 HTML 檔案部署，無 version.json）
 
 /* ============================================================================
  * 【區塊 1】CONFIG
