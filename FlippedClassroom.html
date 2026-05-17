@@ -436,7 +436,7 @@ function isAssignedLesson(lesson) {
 /* 判斷對「該名學生」是否為派發中的有效任務（會記錄進度） */
 function isAssignmentForUser(lesson, userName) {
   if (!lesson || !userName || userName === '訪客 (未登入)') return false;
-  if (isTeacher(userName)) return false; // 教師預覽不計算進度
+  if (isTeacher(userName) && !window.__PREVIEW_STUDENT_MODE__) return false; // 教師預覽不計算進度
   if (!isAssignedLesson(lesson)) return false;
   // 是否屬於該學生班別
   return matchesTargetForm(lesson.targetForm, parseUserForm(userName));
@@ -1312,8 +1312,10 @@ function HomeScreen({
   setPreviewStudent,
   registeredUsers
 }) {
-  const teacher = isTeacher(userName);
+  const teacher = previewStudent ? false : isTeacher(userName);
+  if (!previewStudent) {
   useGoogleSignIn(userName, setUserName);
+}
 
   const [activeTab, setActiveTab] = useState('home');
   const [filter, setFilter] = useState('all');
@@ -2761,6 +2763,7 @@ const [previewStudent, setPreviewStudent] = useState(null);
   const { lessons, loading: lessonsLoading, error: lessonsError, refetchLessons } = useLessons();
   /* ★ 教師預覽學生時，整個系統改用學生身份 */
   const effectiveUserName = previewStudent || userName;
+  window.__PREVIEW_STUDENT_MODE__ = !!previewStudent;
   const { allProgress, loading, error, submitProgress, getProgress, refetch } =
     useProgressData(effectiveUserName);
   const { users: registeredUsers, refetchUsers } = useRegisteredUsers(userName);
@@ -2847,7 +2850,7 @@ const [previewStudent, setPreviewStudent] = useState(null);
             className="w-full flex justify-center">
             <LessonPlayerScreen
               lesson={activelesson}
-              userName={userName}
+              userName={effectiveUserName}
               initialProgress={getProgress(activelesson.id)}
               onSaveProgress={handleSaveProgress}
               onBack={() => setScreen('home')}
