@@ -605,9 +605,10 @@ function useToast() { return useContext(ToastContext); }
 /* ============================================================================
  * 【區塊 5】GOOGLE SIGN-IN HOOK
  * ============================================================================ */
-function useGoogleSignIn(userName, setUserName) {
+function useGoogleSignIn(userName, setUserName, enabled = true) {
   const attemptRef = useRef(0);
   useEffect(() => {
+    if (!enabled) return;
     if (userName) { document.body.classList.add('logged-in'); return; }
     document.body.classList.remove('logged-in');
     const maxAttempts = 60;
@@ -644,7 +645,7 @@ function useGoogleSignIn(userName, setUserName) {
     }
     timer = setTimeout(tryRender, 300);
     return () => { if (timer) clearTimeout(timer); };
-  }, [userName, setUserName]);
+  }, [userName, setUserName, enabled]);
 }
 
 /* ============================================================================
@@ -1332,9 +1333,7 @@ function HomeScreen({
   registeredUsers
 }) {
   const teacher = previewStudent ? false : isTeacher(userName);
-  if (!previewStudent) {
-  useGoogleSignIn(userName, setUserName);
-}
+  useGoogleSignIn(userName, setUserName, !previewStudent);
 
   const [activeTab, setActiveTab] = useState('home');
   const [filter, setFilter] = useState('all');
