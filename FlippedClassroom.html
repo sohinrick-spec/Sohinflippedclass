@@ -1389,18 +1389,66 @@ function HomeScreen({
   }, [filteredLessons]);
 
   const sortedTopicEntries = useMemo(() => {
-    return Object.entries(groupedLessons).sort(([topicA], [topicB]) => {
-      if (topicA === '未分類') return 1;
-      if (topicB === '未分類') return -1;
-      const aIsE = topicA.toUpperCase().startsWith('E');
-      const bIsE = topicB.toUpperCase().startsWith('E');
-      if (aIsE && !bIsE) return 1;
-      if (!aIsE && bIsE) return -1;
-      const numA = parseInt(topicA.toUpperCase().replace('E', ''), 10) || 0;
-      const numB = parseInt(topicB.toUpperCase().replace('E', ''), 10) || 0;
-      return numA - numB;
-    });
-  }, [groupedLessons]);
+
+  function getTopicOrder(topic) {
+    if (!topic) {
+      return { group: 999, num: 999 };
+    }
+
+    const t = topic.trim();
+
+    // Ch.1 ~ Ch.30
+    const chMatch = t.match(/^Ch\.?\s*(\d+)/i);
+    if (chMatch) {
+      return {
+        group: 1,
+        num: parseInt(chMatch[1], 10)
+      };
+    }
+
+    // E1 ~ E4
+    const eMatch = t.match(/^E\s*(\d+)/i);
+    if (eMatch) {
+      return {
+        group: 2,
+        num: parseInt(eMatch[1], 10)
+      };
+    }
+
+    // 其他分類
+    if (t === '未分類') {
+      return {
+        group: 999,
+        num: 999
+      };
+    }
+
+    return {
+      group: 500,
+      num: 500
+    };
+  }
+
+  return Object.entries(groupedLessons).sort(([topicA], [topicB]) => {
+
+    const a = getTopicOrder(topicA);
+    const b = getTopicOrder(topicB);
+
+    // 先按群組排序
+    if (a.group !== b.group) {
+      return a.group - b.group;
+    }
+
+    // 同群組按數字排序
+    if (a.num !== b.num) {
+      return a.num - b.num;
+    }
+
+    // 最後按字母
+    return topicA.localeCompare(topicB, 'zh-Hant');
+  });
+
+}, [groupedLessons]);
 
   if (!userName) {
     return (
