@@ -1307,7 +1307,6 @@ function HomeScreen({
   userName, setUserName, isGuest, setIsGuest,
   lessons, lessonsLoading, lessonsError, refetchLessons,
   getProgress, allProgress, isDark, onOpenLesson, onOpenTeacher, onOpenAdmin,
-
   previewStudent,
   setPreviewStudent,
   registeredUsers
@@ -1626,6 +1625,52 @@ if (teacher) {
                 建立新課題並指派班級
               </p>
             </button>
+
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5">
+
+  <div className="flex items-center justify-between mb-2">
+    <div>
+      <h4 className="font-bold text-sm text-gray-800 dark:text-gray-100">
+        預覽學生介面
+      </h4>
+
+      <p className="text-[11px] text-gray-400 mt-0.5">
+        以學生身份查看首頁
+      </p>
+    </div>
+
+    <i className="fas fa-user-graduate text-indigo-500 text-xl"></i>
+  </div>
+
+  <select
+    value={previewStudent || ''}
+    onChange={(e) => {
+      const val = e.target.value;
+      setPreviewStudent(val || null);
+    }}
+    className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+  >
+    <option value="">選擇學生...</option>
+
+    {(registeredUsers || [])
+      .filter(name => !isTeacher(name))
+      .sort()
+      .map(name => (
+        <option key={name} value={name}>
+          {shortenName(name)}
+        </option>
+      ))}
+  </select>
+
+  {previewStudent && (
+    <button
+      onClick={() => setPreviewStudent(null)}
+      className="mt-2 w-full py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 text-xs font-bold"
+    >
+      結束預覽模式
+    </button>
+  )}
+</div>
 
           </div>
 
