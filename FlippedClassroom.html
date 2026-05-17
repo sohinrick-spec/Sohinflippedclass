@@ -2164,6 +2164,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
 
   async function handleSubmit() {
     if (!isAssignment) return;
+    if (!questionsUnlocked) { toast(`請先觀看影片至 ${CONFIG.VIDEO_UNLOCK_THRESHOLD}%`, 'warning'); return; }
     if (!allAnswered) { toast('請先回答所有題目', 'warning'); return; }
     setSubmitLoading(true);
     const now = new Date().toISOString();
@@ -2285,7 +2286,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
           {isAssignment && (
             <div className="relative">
               {!questionsUnlocked && (
-                <div className="question-lock-overlay absolute inset-0 z-10 rounded-2xl bg-white/70 dark:bg-gray-900/70 flex flex-col items-center justify-center gap-3">
+                <div className="question-lock-overlay absolute inset-0 z-10 rounded-2xl bg-white/70 dark:bg-gray-900/70 flex flex-col items-center justify-center gap-3" style={{pointerEvents:'all'}}>
                   <i className="fas fa-lock text-4xl text-gray-400 dark:text-gray-500"></i>
                   <p className="text-sm font-bold text-gray-500 dark:text-gray-400">
                     觀看影片達 {CONFIG.VIDEO_UNLOCK_THRESHOLD}% 後解鎖題目
@@ -2377,8 +2378,8 @@ function QuestionItem({ question, index, answer, onAnswer, disabled }) {
         <div className="grid grid-cols-1 gap-2">
           {question.options.map((opt, oi) => {
             const selected  = answer === String(oi);
-            const isCorrect = disabled && oi === question.answer;
-            const isWrong   = disabled && selected && oi !== question.answer;
+            const isCorrect = disabled && String(oi) === String(question.answer);
+            const isWrong   = disabled && selected && String(oi) !== String(question.answer);
             return (
               <button key={oi} onClick={() => !disabled && onAnswer(String(oi))}
                 className={`text-left px-4 py-2.5 rounded-xl border-2 text-sm transition-all font-medium ${
@@ -2434,8 +2435,7 @@ function TeacherDashboardScreen({ lessons, allProgress, registeredUsers, onBack,
   const assignedLessons = useMemo(() => lessons.filter(l => isAssignedLesson(l)), [lessons]);
 
   const lessonStats = useMemo(() => {
-      const progressEntries = Object.entries(allProgress || {});
-    return assignedLessons.map(lesson => {
+      return assignedLessons.map(lesson => {
       const progressMap = allProgress?.[lesson.id] || {};
       const students    = Object.entries(progressMap);
       const started     = students.length;
@@ -2933,13 +2933,13 @@ const [previewStudent, setPreviewStudent] = useState(null);
           </motion.div>
         )}
 
-        {screen === 'lesson' && activelesson && (
+        {screen === 'lesson' && activeLesson && (
           <motion.div key="lesson" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
             className="w-full flex justify-center">
             <LessonPlayerScreen
-              lesson={activelesson}
+              lesson={activeLesson}
               userName={effectiveUserName}
-              initialProgress={getProgress(activelesson.id)}
+              initialProgress={getProgress(activeLesson.id)}
               onSaveProgress={handleSaveProgress}
               onBack={() => setScreen('home')}
               isAssignment={currentIsAssignment}
@@ -2970,12 +2970,12 @@ const [previewStudent, setPreviewStudent] = useState(null);
           </motion.div>
         )}
 
-        {screen === 'teacher_lesson_report' && activelesson && (
+        {screen === 'teacher_lesson_report' && activeLesson && (
           <motion.div key="treport" initial={{opacity:0,x:50}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-50}}
             className="w-full flex justify-center">
             {isTeacher(userName) ? (
               <TeacherLessonReportScreen
-                lesson={activelesson}
+                lesson={activeLesson}
                 allProgress={allProgress}
                 registeredUsers={registeredUsers}
                 onBack={() => setScreen('teacher_dashboard')}
