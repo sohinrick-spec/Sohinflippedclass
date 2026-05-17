@@ -1652,14 +1652,14 @@ if (teacher) {
   >
     <option value="">選擇學生...</option>
 
-    {(registeredUsers || [])
-      .filter(name => !isTeacher(name))
-      .sort()
-      .map(name => (
-        <option key={name} value={name}>
-          {shortenName(name)}
-        </option>
-      ))}
+    {Object.keys(allProgress || {})
+  .filter(name => !isTeacher(name))
+  .sort()
+  .map(name => (
+    <option key={name} value={name}>
+      {{name}}
+    </option>
+  ))}
   </select>
 
   {previewStudent && (
