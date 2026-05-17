@@ -1855,6 +1855,64 @@ if (teacher) {
                 </div>
               )}
 
+              {!lessonsLoading && completedCount > 0 && (
+                <div>
+                  <h3 className="font-bold text-gray-700 dark:text-gray-200 mb-3 flex items-center gap-2">
+                    <span className="w-1 h-5 bg-gradient-to-b from-green-400 to-emerald-500 rounded-full"></span>
+                    已完成任務 ({completedCount})
+                  </h3>
+                  <div className="space-y-2">
+                    {visibleLessons
+                      .filter(l => isAssignedLesson(l) && !!getProgress(l.id)?.completedAt)
+                      .map(lesson => (
+                        <button key={lesson.id} onClick={() => onOpenLesson(lesson)}
+                          className="w-full text-left rounded-xl border border-green-100 dark:border-green-800/50 bg-green-50/50 dark:bg-green-900/10 px-3 py-2.5 flex items-center gap-2.5 transition-all hover:bg-green-50 dark:hover:bg-green-900/20">
+                          <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
+                            <i className="fas fa-check text-green-600 dark:text-green-400 text-xs"></i>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-gray-700 dark:text-gray-200 text-sm truncate">{lesson.title}</p>
+                            <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
+                              <i className="fas fa-check-circle mr-0.5"></i>
+                              完成於 {new Date(getProgress(lesson.id).completedAt).toLocaleDateString('zh-HK')}
+                            </p>
+                          </div>
+                          <i className="fas fa-chevron-right text-gray-300 dark:text-gray-600 text-xs"></i>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {!lessonsLoading && completedCount > 0 && (
+                <div>
+                  <h3 className="font-bold text-gray-700 dark:text-gray-200 mb-3 flex items-center gap-2">
+                    <span className="w-1 h-5 bg-gradient-to-b from-green-400 to-emerald-500 rounded-full"></span>
+                    已完成任務 ({completedCount})
+                  </h3>
+                  <div className="space-y-2">
+                    {visibleLessons
+                      .filter(l => isAssignedLesson(l) && !!getProgress(l.id)?.completedAt)
+                      .map(lesson => (
+                        <button key={lesson.id} onClick={() => onOpenLesson(lesson)}
+                          className="w-full text-left rounded-xl border border-green-100 dark:border-green-800/50 bg-green-50/50 dark:bg-green-900/10 px-3 py-2.5 flex items-center gap-2.5 transition-all hover:bg-green-50 dark:hover:bg-green-900/20">
+                          <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
+                            <i className="fas fa-check text-green-600 dark:text-green-400 text-xs"></i>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-gray-700 dark:text-gray-200 text-sm truncate">{lesson.title}</p>
+                            <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
+                              <i className="fas fa-check-circle mr-0.5"></i>
+                              完成於 {new Date(getProgress(lesson.id).completedAt).toLocaleDateString('zh-HK')}
+                            </p>
+                          </div>
+                          <i className="fas fa-chevron-right text-gray-300 dark:text-gray-600 text-xs"></i>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
               {/* 影片庫入口卡 */}
               {!lessonsLoading && (
                 <div>
@@ -2087,6 +2145,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   const trackTimer   = useRef(null);
   const containerRef = useRef(null);
   const watchedSecondsRef = useRef(new Set());
+  const replayMapRef = useRef({}); /* ★ 熱點圖：記錄每秒重看次數 */
   const hasVideo     = lesson.videoId &&
                        lesson.videoId !== 'PLACEHOLDER_VIDEO_ID' &&
                        lesson.videoId !== 'YOUTUBE_VIDEO_ID_HERE' &&
@@ -2115,6 +2174,11 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
             if (dur > 0 && initialProgress?.watchPct > 0) {
               const prefilledSeconds = Math.floor((initialProgress.watchPct / 100) * dur);
               for (let s = 0; s < prefilledSeconds; s++) watchedSecondsRef.current.add(s);
+              /* ★ 斷點續播：自動跳至上次觀看位置 */
+              const seekTime = Math.floor((initialProgress.watchPct / 100) * dur);
+              if (seekTime > 10) {
+                try { playerRef.current.seekTo(seekTime, true); } catch {}
+              }
             }
           },
           onStateChange: (e) => {
@@ -2142,6 +2206,7 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
       const dur  = playerRef.current.getDuration();
       if (dur > 0) {
         watchedSecondsRef.current.add(cur);
+        replayMapRef.current[cur] = (replayMapRef.current[cur] || 0) + 1; /* ★ 重看計數 */
         const actualWatchPct = (watchedSecondsRef.current.size / dur) * 100;
         setMaxWatchPct(prev => Math.max(prev, actualWatchPct));
       }
@@ -2155,9 +2220,15 @@ function LessonPlayerScreen({ lesson, userName, initialProgress, onSaveProgress,
   /* ★★★ 修復 5：只有派發任務才寫入進度 ★★★ */
   useEffect(() => {
     if (!isAssignment) return;
+    /* ★ 只保留重看次數 > 1 的片段 */
+    const heatmap = {};
+    Object.entries(replayMapRef.current).forEach(([sec, cnt]) => {
+      if (cnt > 1) heatmap[sec] = cnt;
+    });
     const prog = {
       watchPct: maxWatchPct, answers, completedAt,
-      startedAt: initialProgress?.startedAt || new Date().toISOString()
+      startedAt: initialProgress?.startedAt || new Date().toISOString(),
+      ...(Object.keys(heatmap).length > 0 ? { heatmap } : {})
     };
     onSaveProgress(lesson.id, prog, true);
   }, [maxWatchPct, completedAt, answers, isAssignment]);
@@ -2647,6 +2718,90 @@ function TeacherLessonsByGrade({ lessonStats, registeredUsers, onViewLessonRepor
 /* ============================================================================
  * 【區塊 12】TEACHER LESSON REPORT SCREEN
  * ============================================================================ */
+function HeatmapView({ studentList }) {
+  const data = useMemo(() => {
+    const merged = {};
+    studentList.forEach(s => {
+      if (!s.heatmap) return;
+      Object.entries(s.heatmap).forEach(([sec, cnt]) => {
+        merged[Number(sec)] = (merged[Number(sec)] || 0) + cnt;
+      });
+    });
+    const secKeys = Object.keys(merged).map(Number);
+    if (secKeys.length === 0) return null;
+    const totalDur = Math.max(...secKeys);
+    const segCount = 20;
+    const segs = [];
+    for (let i = 0; i < segCount; i++) {
+      const start = Math.floor((i / segCount) * totalDur);
+      const end   = Math.floor(((i + 1) / segCount) * totalDur);
+      let total = 0;
+      secKeys.forEach(s => { if (s >= start && s < end) total += merged[s]; });
+      segs.push({ start, end, total });
+    }
+    return { segs, totalDur, maxSeg: Math.max(...segs.map(s => s.total), 1) };
+  }, [studentList]);
+
+  if (!data) return <EmptyState icon="🔥" title="暫無重看熱點資料" subtitle="學生重複觀看某片段後，此處將顯示熱點分佈。" />;
+  const { segs, totalDur, maxSeg } = data;
+  const hotSegments = [...segs].filter(s => s.total > maxSeg * 0.4).sort((a,b) => b.total - a.total).slice(0, 5);
+
+  return (
+    <div className="space-y-4">
+      <div className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl">
+        <p className="text-xs font-bold text-orange-700 dark:text-orange-300 mb-1 flex items-center gap-1">
+          <i className="fas fa-fire"></i>重看熱點圖
+        </p>
+        <p className="text-[11px] text-orange-600 dark:text-orange-400">條越高代表該片段被重複觀看次數越多，代表該處是學生難點，建議實體課重點講解。</p>
+      </div>
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+        <div className="flex items-end gap-0.5 h-24">
+          {segs.map((seg, i) => {
+            const h = (seg.total / maxSeg) * 100;
+            const isHot = seg.total > maxSeg * 0.4;
+            return (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end group relative">
+                <div className={`w-full rounded-t ${isHot ? 'bg-gradient-to-t from-red-500 to-orange-400' : 'bg-gradient-to-t from-indigo-200 to-blue-200 dark:from-indigo-800 dark:to-blue-900'}`}
+                     style={{ height: `${Math.max(h, 2)}%` }} />
+                <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10 pointer-events-none">
+                  {Math.floor(seg.start/60)}:{String(seg.start%60).padStart(2,'0')}–{Math.floor(seg.end/60)}:{String(seg.end%60).padStart(2,'0')} · {seg.total}次
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-[9px] text-gray-400 mt-1.5">
+          <span>0:00</span>
+          <span>{Math.floor(totalDur/60)}:{String(totalDur%60).padStart(2,'0')}</span>
+        </div>
+      </div>
+      {hotSegments.length > 0 && (
+        <div>
+          <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 mb-2 flex items-center gap-1">
+            <i className="fas fa-exclamation-triangle text-amber-500"></i>建議實體課重點講解片段
+          </h4>
+          <div className="space-y-2">
+            {hotSegments.map((seg, i) => (
+              <div key={i} className="flex items-center gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 rounded-lg px-3 py-2">
+                <span className="text-lg">{['🔥','🌡️','⚠️','📌','📍'][i]}</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                    {Math.floor(seg.start/60)}:{String(seg.start%60).padStart(2,'0')} – {Math.floor(seg.end/60)}:{String(seg.end%60).padStart(2,'0')}
+                  </p>
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400">重複觀看 {seg.total} 次</p>
+                </div>
+                <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-orange-400 to-red-500 rounded-full" style={{ width: `${(seg.total/maxSeg)*100}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBack }) {
   const [expandedStudent, setExpandedStudent] = useState(null);
   const [showTab, setShowTab] = useState('started');
@@ -2717,6 +2872,10 @@ function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBac
             <button onClick={() => setShowTab('not_started')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${showTab === 'not_started' ? 'bg-white dark:bg-gray-600 text-red-500 dark:text-red-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>
               <i className="fas fa-eye-slash mr-1"></i>未點開 ({notStartedStudents.length})
+            </button>
+            <button onClick={() => setShowTab('heatmap')}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${showTab === 'heatmap' ? 'bg-white dark:bg-gray-600 text-orange-500 dark:text-orange-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>
+              <i className="fas fa-fire mr-1"></i>熱點圖
             </button>
           </div>
 
@@ -2824,7 +2983,7 @@ function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBac
                   以下學生曾登入過系統但尚未開始此課題（包含已登入但未派發者）。
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {notStartedStudents.sort().map(name => (
+                                    {notStartedStudents.sort().map(name => (
                     <div key={name} className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-lg px-3 py-2">
                       <div className="w-6 h-6 rounded-full bg-red-200 dark:bg-red-800/50 flex items-center justify-center text-[9px] font-bold text-red-700 dark:text-red-300 flex-shrink-0">
                         {getInitials(name)}
@@ -2836,11 +2995,14 @@ function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBac
               </div>
             )
           )}
+
+          {showTab === 'heatmap' && <HeatmapView studentList={studentList} />}
         </div>
       </div>
     </div>
   );
 }
+
 
 /* ============================================================================
  * 【區塊 13】MAIN APP
@@ -3208,6 +3370,31 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
     }
   };
 
+  const handleDelete = async (lessonId, lessonTitle) => {
+    if (!window.confirm(`確定要刪除「${lessonTitle}」？\n此操作不可復原。`)) return;
+    if (!isScriptConfigured()) return toast('⚠️ 未配置 Google Sheet', 'error');
+    setCreating(true);
+    try {
+      const res = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+        method: 'POST', redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'deleteLesson', lessonId, deletedBy: userName, deletedAt: new Date().toISOString() })
+      });
+      let data = {};
+      try { data = JSON.parse(await res.text()); } catch { data = { success: true }; }
+      if (data.success || data.result === 'success' || data.message) {
+        toast('🗑️ 任務已刪除', 'success');
+        if (refetchLessons) await refetchLessons();
+      } else {
+        toast(`刪除失敗: ${data.error || JSON.stringify(data)}`, 'error');
+      }
+    } catch (e) {
+      toast(`網絡錯誤: ${e.message}`, 'error');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="w-full max-w-xl">
       <div className="glass-panel rounded-3xl shadow-xl overflow-hidden flex flex-col" style={{ maxHeight: '94vh' }}>
@@ -3310,9 +3497,29 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
                   <select value={targetForm} onChange={e => setTargetForm(e.target.value)}
                     className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm">
                     <option value="All">全體</option>
-                    <option value="4">中四</option>
-                    <option value="5">中五</option>
-                    <option value="6">中六</option>
+                    <optgroup label="── 按年級 ──">
+                      <option value="4">中四（全部班別）</option>
+                      <option value="5">中五（全部班別）</option>
+                      <option value="6">中六（全部班別）</option>
+                    </optgroup>
+                    <optgroup label="── 中四班別 ──">
+                      <option value="4A">4A班</option>
+                      <option value="4B">4B班</option>
+                      <option value="4C">4C班</option>
+                      <option value="4D">4D班</option>
+                    </optgroup>
+                    <optgroup label="── 中五班別 ──">
+                      <option value="5A">5A班</option>
+                      <option value="5B">5B班</option>
+                      <option value="5C">5C班</option>
+                      <option value="5D">5D班</option>
+                    </optgroup>
+                    <optgroup label="── 中六班別 ──">
+                      <option value="6A">6A班</option>
+                      <option value="6B">6B班</option>
+                      <option value="6C">6C班</option>
+                      <option value="6D">6D班</option>
+                    </optgroup>
                   </select>
                 </div>
                 <div>
@@ -3344,7 +3551,7 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
               </button>
             </div>
           ) : (
-            <AssignedLessonsView lessonStats={lessonStats} onEdit={handleEdit} />
+            <AssignedLessonsView lessonStats={lessonStats} onEdit={handleEdit} onDelete={handleDelete} />
           )}
         </div>
       </div>
@@ -3352,7 +3559,7 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
   );
 }
 
-function AssignedLessonCard({ lesson, started, completed, progressMap, classmates, notStarted, onEdit }) {
+function AssignedLessonCard({ lesson, started, completed, progressMap, classmates, notStarted, onEdit, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const totalQ = lesson.questions?.length || 0;
   const studentList = Object.entries(progressMap)
@@ -3393,12 +3600,20 @@ function AssignedLessonCard({ lesson, started, completed, progressMap, classmate
               {completionRate}%
             </div>
             <div className="text-[9px] text-gray-400 -mt-1">完成率</div>
-            {onEdit && (
-              <button onClick={(e) => { e.stopPropagation(); onEdit(lesson); }}
-                className="mt-1 text-[10px] px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-1">
-                <i className="fas fa-pen text-[9px]"></i>編輯
-              </button>
-            )}
+            <div className="flex gap-1 mt-1">
+              {onEdit && (
+                <button onClick={(e) => { e.stopPropagation(); onEdit(lesson); }}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-1">
+                  <i className="fas fa-pen text-[9px]"></i>編輯
+                </button>
+              )}
+              {onDelete && (
+                <button onClick={(e) => { e.stopPropagation(); onDelete(lesson.id, lesson.title); }}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400 font-bold hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors flex items-center gap-1">
+                  <i className="fas fa-trash text-[9px]"></i>刪除
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -3497,7 +3712,7 @@ function AssignedLessonCard({ lesson, started, completed, progressMap, classmate
   );
 }
 
-function AssignedLessonsView({ lessonStats, onEdit }) {
+function AssignedLessonsView({ lessonStats, onEdit, onDelete }) {
   const [gradeFilter, setGradeFilter] = useState('all');
 
   const GRADE_CONFIG = [
@@ -3572,7 +3787,7 @@ function AssignedLessonsView({ lessonStats, onEdit }) {
           <AssignedLessonCard key={lesson.id}
             lesson={lesson} started={started} completed={completed}
             progressMap={progressMap} classmates={classmates} notStarted={notStarted}
-            onEdit={onEdit} />
+            onEdit={onEdit} onDelete={onDelete} />
         ))
       )}
     </div>
