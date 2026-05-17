@@ -1753,6 +1753,19 @@ if (teacher) {
 
   return (
     <div className="w-full max-w-lg landscape:max-w-3xl">
+      {previewStudent && (
+        <div className="mb-3 flex items-center justify-between bg-amber-500 text-white px-4 py-2.5 rounded-2xl shadow-lg">
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <i className="fas fa-user-graduate"></i>
+            <span>預覽中：{shortenName(previewStudent)}</span>
+          </div>
+          <button
+            onClick={() => setPreviewStudent(null)}
+            className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
+            <i className="fas fa-arrow-left text-[10px]"></i>返回教師視角
+          </button>
+        </div>
+      )}
       <div className="glass-panel rounded-3xl shadow-xl overflow-hidden flex flex-col" style={{ maxHeight: '94vh' }}>
 
         <div className="hero-gradient p-5 sm:p-6 text-white relative flex-shrink-0">
