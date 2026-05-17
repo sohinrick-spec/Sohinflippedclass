@@ -1980,10 +1980,9 @@ if (teacher) {
 
                 <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1">
                   {[
-                    { id:'all',       label:'全部',   icon:'fa-list',           count: visibleLessons.length },
-                    { id:'pending',   label:'待辦',   icon:'fa-hourglass-half', count: pendingCount },
-                    { id:'completed', label:'已完成', icon:'fa-check-circle',   count: completedCount },
-                    { id:'free',      label:'自由觀看', icon:'fa-eye',          count: freeCount },
+                      { id:'all',       label:'全部',   icon:'fa-list',           count: visibleLessons.length },
+                      { id:'pending',   label:'待辦',   icon:'fa-hourglass-half', count: pendingCount },
+                      { id:'completed', label:'已完成', icon:'fa-check-circle',   count: completedCount },
                   ].map(f => (
                     <button key={f.id} onClick={() => setFilter(f.id)}
                       className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-bold transition-all flex-shrink-0 ${
@@ -2010,7 +2009,7 @@ if (teacher) {
                 />
               ) : (
                 <div className="space-y-3">
-                  {sortedTopicEntries.slice(0, 12).map(([topic, topicLessons]) => {
+                  {sortedTopicEntries.map(([topic, topicLessons]) => {
                     const done = topicLessons.filter(l => !!getProgress(l.id)?.completedAt).length;
                     const isOpen = openTopics[topic];
                     return (
@@ -2059,33 +2058,7 @@ if (teacher) {
                 </div>
               )}
 
-              {!lessonsLoading && freeCount > 0 && (
-                <div>
-                  <h3 className="font-bold text-gray-700 dark:text-gray-200 mb-2 flex items-center gap-2">
-                    <span className="text-base">🍿</span>自由觀看
-                    <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded-full">{freeCount}</span>
-                  </h3>
-                  <div className="space-y-2">
-                    {visibleLessons.filter(l => !isAssignedLesson(l)).slice(0, 5).map(lesson => (
-                      <button key={lesson.id} onClick={() => onOpenLesson(lesson)}
-                        className="w-full text-left rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800 px-3 py-2.5 flex items-center gap-2.5 transition-all hover:bg-purple-50 dark:hover:bg-purple-900/10">
-                        <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center flex-shrink-0 text-sm">🍿</div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-gray-700 dark:text-gray-200 text-sm truncate">{lesson.title}</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">{lesson.estimatedMin > 0 ? `${lesson.estimatedMin} 分鐘` : '自由觀看'}</p>
-                        </div>
-                        <i className="fas fa-chevron-right text-gray-300 dark:text-gray-600 text-xs"></i>
-                      </button>
-                    ))}
-                    {freeCount > 5 && (
-                      <button onClick={() => { setActiveTab('library'); setFilter('free'); }}
-                        className="w-full text-center text-xs text-indigo-500 font-bold py-2 hover:underline">
-                        查看全部 {freeCount} 部 →
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
+              
             </div>
           )}
 
