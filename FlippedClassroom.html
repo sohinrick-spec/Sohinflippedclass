@@ -226,7 +226,7 @@ const CONFIG = {
   APP_SUBTITLE:          '觀看影片，掌握知識',
   GOOGLE_SCRIPT_URL:     'https://script.google.com/macros/s/AKfycbzusmHGsYA0NQpSwzWYhlGM1pLqpopyNX_Gdhfz_W59Vg-lwkDlH9WOyDrGOujcY-yhuQ/exec',
   GOOGLE_CLIENT_ID:      '1009693128680-5g65g888ss72cqr8dkdl84ci77rc7qv1.apps.googleusercontent.com',
-  
+  ALLOWED_EMAIL_DOMAIN:  '@tcss.edu.hk',
   TEACHER_NAMES:         ['Chi Hin So'],
   VIDEO_UNLOCK_THRESHOLD:  80,
   VIDEO_COMPLETE_THRESHOLD: 90,
@@ -2435,7 +2435,11 @@ function TeacherDashboardScreen({ lessons, allProgress, registeredUsers, onBack,
   const assignedLessons = useMemo(() => lessons.filter(l => isAssignedLesson(l)), [lessons]);
 
   const lessonStats = useMemo(() => {
-      return assignedLessons.map(lesson => {
+    const allKnown = new Set();
+    Object.values(allProgress || {}).forEach(lp => Object.keys(lp).forEach(n => allKnown.add(n)));
+    (registeredUsers || []).forEach(n => allKnown.add(n));
+
+    return assignedLessons.map(lesson => {
       const progressMap = allProgress?.[lesson.id] || {};
       const students    = Object.entries(progressMap);
       const started     = students.length;
@@ -2443,9 +2447,11 @@ function TeacherDashboardScreen({ lessons, allProgress, registeredUsers, onBack,
       const avgWatch    = started > 0
         ? Math.round(students.reduce((a,[,p]) => a + (p.watchPct||0), 0) / started)
         : 0;
-      return { lesson, started, completed, avgWatch, progressMap };
+      const classmates  = [...allKnown].filter(name => matchesTargetForm(lesson.targetForm, parseUserForm(name)));
+      const notStarted  = classmates.filter(name => !progressMap[name]).length;
+      return { lesson, started, completed, avgWatch, progressMap, classmates: classmates.length, notStarted };
     });
-  }, [assignedLessons, allProgress]);
+  }, [assignedLessons, allProgress, registeredUsers]);
 
   /* ★ 修復 1：合併已登入用戶與有進度紀錄者 */
   const totalStudents = useMemo(() => {
@@ -2459,7 +2465,8 @@ function TeacherDashboardScreen({ lessons, allProgress, registeredUsers, onBack,
 
   const totalCompleted = lessonStats.reduce((a,s) => a + s.completed, 0);
   const totalStarted   = lessonStats.reduce((a,s) => a + s.started, 0);
-  const completionRate = totalStarted > 0 ? Math.round((totalCompleted / totalStarted) * 100) : 0;
+  const totalExpected  = lessonStats.reduce((a,s) => a + s.classmates, 0);
+  const completionRate = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
 
   return (
     <div className="w-full max-w-3xl">
@@ -2603,12 +2610,12 @@ function TeacherLessonsByGrade({ lessonStats, registeredUsers, onViewLessonRepor
                   <div className="flex justify-between text-[10px] text-gray-400 mb-0.5">
                     <span>完成率</span>
                     <span className="font-bold">
-                      {s.started > 0 ? `${Math.round((s.completed/s.started)*100)}%` : '—'}
+                      {s.classmates > 0 ? `${Math.round((s.completed/s.classmates)*100)}%` : '—'}
                     </span>
                   </div>
                   <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full transition-all duration-700"
-                         style={{ width: s.started > 0 ? `${(s.completed/s.started)*100}%` : '0%' }} />
+                         style={{ width: s.classmates > 0 ? `${(s.completed/s.classmates)*100}%` : '0%' }} />
                   </div>
                 </div>
                 <div>
@@ -2623,9 +2630,10 @@ function TeacherLessonsByGrade({ lessonStats, registeredUsers, onViewLessonRepor
                 </div>
               </div>
 
-              <div className="mt-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-3">
+              <div className="mt-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-3 flex-wrap">
                 <span><i className="fas fa-users mr-0.5"></i>{s.started} 人已開始</span>
                 <span><i className="fas fa-check-circle mr-0.5 text-green-500"></i>{s.completed} 人完成</span>
+                {s.notStarted > 0 && <span className="text-red-400"><i className="fas fa-eye-slash mr-0.5"></i>{s.notStarted} 未開始</span>}
               </div>
             </div>
             <i className="fas fa-chevron-right text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0"></i>
@@ -3020,6 +3028,7 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('create');
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [topic, setTopic] = useState('必修部分');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -3079,6 +3088,65 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
       }
     } else {
       setVideoId(''); setTitle('');
+    }
+  };
+
+  const handleEdit = (lesson) => {
+    setEditingId(lesson.id);
+    setTopic(lesson.topic || '必修部分');
+    setTitle(lesson.title || '');
+    setDescription(lesson.description || '');
+    setVideoId(lesson.videoId || '');
+    setDueDate(lesson.dueDate || '');
+    setEstimatedMin(lesson.estimatedMin || 10);
+    setTargetForm(lesson.targetForm || 'All');
+    setVideoSelection('custom');
+    setActiveTab('create');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setTitle(''); setDescription(''); setVideoId(''); setVideoSelection('');
+    setDueDate(''); setEstimatedMin(10); setTargetForm('All');
+  };
+
+  const handleUpdate = async () => {
+    if (!title.trim()) return toast('請輸入任務標題', 'warning');
+    if (!videoId.trim()) return toast('請輸入影片 ID', 'warning');
+    if (!dueDate) return toast('請設定截止日期', 'warning');
+    if (!isScriptConfigured()) return toast('⚠️ 未配置 Google Sheet', 'error');
+    setCreating(true);
+    const payload = {
+      action: 'updateLesson',
+      lessonId: editingId,
+      lesson: {
+        id: editingId, topic, title: title.trim(), description: description.trim(),
+        videoId: videoId.trim(), dueDate, estimatedMin: Number(estimatedMin),
+        targetForm: targetForm.trim() || 'All'
+      },
+      updatedBy: userName,
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      const res = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+        method: 'POST', redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      let data = {};
+      try { data = JSON.parse(await res.text()); } catch { data = { success: true }; }
+      if (data.success || data.result === 'success' || data.message) {
+        toast('✅ 任務更新成功！', 'success');
+        handleCancelEdit();
+        if (refetchLessons) await refetchLessons();
+        setTimeout(() => { setActiveTab('status'); if (refetchLessons) refetchLessons(); }, 800);
+      } else {
+        toast(`更新失敗: ${data.error || JSON.stringify(data)}`, 'error');
+      }
+    } catch (e) {
+      toast(`網絡錯誤: ${e.message}`, 'error');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -3256,13 +3324,27 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
                 </div>
               </div>
 
-              <button onClick={handleCreate} disabled={creating}
-                className={`w-full py-3 rounded-xl font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 ${creating ? 'bg-gray-400' : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:scale-[1.02]'}`}>
-                {creating ? <><i className="fas fa-spinner fa-spin"></i>發佈中（同步至 Sheet）...</> : <><i className="fas fa-paper-plane"></i>確認發佈任務</>}
+              {editingId && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between">
+                  <span><i className="fas fa-pen mr-1"></i>正在編輯已發佈任務</span>
+                  <button onClick={handleCancelEdit} className="text-amber-500 hover:text-amber-700 font-bold">取消編輯</button>
+                </div>
+              )}
+              <button onClick={editingId ? handleUpdate : handleCreate} disabled={creating}
+                className={`w-full py-3 rounded-xl font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 ${
+                  creating ? 'bg-gray-400' : editingId
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:scale-[1.02]'
+                    : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:scale-[1.02]'
+                }`}>
+                {creating
+                  ? <><i className="fas fa-spinner fa-spin"></i>{editingId ? '更新中...' : '發佈中...'}</>
+                  : editingId
+                    ? <><i className="fas fa-save"></i>確認更新任務</>
+                    : <><i className="fas fa-paper-plane"></i>確認發佈任務</>}
               </button>
             </div>
           ) : (
-            <AssignedLessonsView lessonStats={lessonStats} />
+            <AssignedLessonsView lessonStats={lessonStats} onEdit={handleEdit} />
           )}
         </div>
       </div>
@@ -3270,7 +3352,7 @@ function AssignmentAdminScreen({ userName, onBack, refetchLessons, lessons = [],
   );
 }
 
-function AssignedLessonCard({ lesson, started, completed, progressMap, classmates, notStarted }) {
+function AssignedLessonCard({ lesson, started, completed, progressMap, classmates, notStarted, onEdit }) {
   const [expanded, setExpanded] = useState(false);
   const totalQ = lesson.questions?.length || 0;
   const studentList = Object.entries(progressMap)
@@ -3306,11 +3388,17 @@ function AssignedLessonCard({ lesson, started, completed, progressMap, classmate
             </div>
             <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm line-clamp-1">{lesson.title}</h3>
           </div>
-          <div className="text-right flex-shrink-0">
+          <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
             <div className="text-2xl font-extrabold bg-gradient-to-r from-green-500 to-emerald-500 bg-clip-text text-transparent">
               {completionRate}%
             </div>
             <div className="text-[9px] text-gray-400 -mt-1">完成率</div>
+            {onEdit && (
+              <button onClick={(e) => { e.stopPropagation(); onEdit(lesson); }}
+                className="mt-1 text-[10px] px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-1">
+                <i className="fas fa-pen text-[9px]"></i>編輯
+              </button>
+            )}
           </div>
         </div>
 
@@ -3409,7 +3497,7 @@ function AssignedLessonCard({ lesson, started, completed, progressMap, classmate
   );
 }
 
-function AssignedLessonsView({ lessonStats }) {
+function AssignedLessonsView({ lessonStats, onEdit }) {
   const [gradeFilter, setGradeFilter] = useState('all');
 
   const GRADE_CONFIG = [
@@ -3483,7 +3571,8 @@ function AssignedLessonsView({ lessonStats }) {
         filteredStats.map(({ lesson, started, completed, progressMap, classmates, notStarted }) => (
           <AssignedLessonCard key={lesson.id}
             lesson={lesson} started={started} completed={completed}
-            progressMap={progressMap} classmates={classmates} notStarted={notStarted} />
+            progressMap={progressMap} classmates={classmates} notStarted={notStarted}
+            onEdit={onEdit} />
         ))
       )}
     </div>
