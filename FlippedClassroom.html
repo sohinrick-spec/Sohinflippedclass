@@ -226,7 +226,7 @@ const CONFIG = {
   APP_SUBTITLE:          '觀看影片，掌握知識',
   GOOGLE_SCRIPT_URL:     'https://script.google.com/macros/s/AKfycbzusmHGsYA0NQpSwzWYhlGM1pLqpopyNX_Gdhfz_W59Vg-lwkDlH9WOyDrGOujcY-yhuQ/exec',
   GOOGLE_CLIENT_ID:      '1009693128680-5g65g888ss72cqr8dkdl84ci77rc7qv1.apps.googleusercontent.com',
-  
+  ALLOWED_EMAIL_DOMAIN:  '@tcss.edu.hk',
   TEACHER_NAMES:         ['Chi Hin So'],
   VIDEO_UNLOCK_THRESHOLD:  80,
   VIDEO_COMPLETE_THRESHOLD: 90,
@@ -374,7 +374,21 @@ function parseUsername(fullName) {
   if (m2) {
     return { displayName: m2[3].trim(), form: m2[1].toUpperCase(), grade: m2[1][0], number: m2[2] };
   }
+  // 額外支援：名稱後只有班別
+const m3 = s.match(/^(.+?)\s*\(([4-6][A-Z]\d+)\)\s*$/i);
+
+if (m3) {
+  const classInfo = m3[2].toUpperCase();
+
+  return {
+    displayName: m3[1].trim(),
+    form: classInfo.slice(0, 2),
+    grade: classInfo[0],
+    number: classInfo.slice(2)
+  };
+}
   return { displayName: s, form: null, grade: null, number: null };
+  
 }
 
 function shortenName(fullName) {
@@ -398,7 +412,7 @@ function parseUserForm(fullName) {
 
 function matchesTargetForm(targetForm, userForm) {
   if (!targetForm || targetForm.trim() === '' || targetForm.trim().toUpperCase() === 'ALL') return true;
-  if (!userForm) return true;
+  if (!userForm) return false;
   const tf = targetForm.trim().toUpperCase();
   const uf = userForm.trim().toUpperCase();
   if (tf === uf) return true;
@@ -1652,14 +1666,43 @@ if (teacher) {
   >
     <option value="">選擇學生...</option>
 
-    {Object.keys(allProgress || {})
-  .filter(name => !isTeacher(name))
-  .sort()
-  .map(name => (
-    <option key={name} value={name}>
-      {{name}}
-    </option>
-  ))}
+{registeredUsers
+  .filter(name => {
+    if (!name) return false;
+
+    // 排除老師
+    if (isTeacher(name)) return false;
+
+    // 必須能解析班別
+    const parsed = parseUsername(name);
+    return !!parsed.form;
+  })
+  .sort((a, b) => {
+    const pa = parseUsername(a);
+    const pb = parseUsername(b);
+
+    // 先按年級
+    if (pa.grade !== pb.grade) {
+      return Number(pa.grade) - Number(pb.grade);
+    }
+
+    // 再按班別
+    if (pa.form !== pb.form) {
+      return pa.form.localeCompare(pb.form);
+    }
+
+    // 最後按學號
+    return Number(pa.number || 0) - Number(pb.number || 0);
+  })
+  .map(name => {
+    const p = parseUsername(name);
+
+    return (
+      <option key={name} value={name}>
+        {p.form} - {shortenName(name)}
+      </option>
+    );
+  })}
   </select>
 
   {previewStudent && (
