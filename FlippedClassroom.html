@@ -2889,22 +2889,57 @@ function TeacherLessonReportScreen({ lesson, allProgress, registeredUsers, onBac
   const completedCount = studentList.filter(s => s.completedAt).length;
 
   function exportCSV() {
-    const headers = ['姓名', '班別', '觀看%', '已完成', '作答數', '開始時間', '完成時間'];
+    // 1. 取得這堂課的題目陣列（確保沒有題目時為空陣列）
+    const questions = lesson.questions || [];
+    
+    // 2. 動態生成每一題的欄位名稱，例如「Q1: 細胞膜的主要成分是？」
+    const questionHeaders = questions.map((q, i) => `Q${i + 1}: ${q.text}`);
+    
+    // 3. 將題目標題合併到原本的表頭後面
+    const headers = ['學生姓名', '班別', '觀看進度(%)', '已完成', '已答題數', '開始時間', '完成時間', ...questionHeaders];
+    
     const rows = [
-      ...studentList.map(s => [
-        shortenName(s.name),
-        parseUserForm(s.name) || '',
-        Math.round(s.watchPct || 0),
-        s.completedAt ? '是' : '否',
-        s.answers ? Object.keys(s.answers).length : 0,
-        s.startedAt ? new Date(s.startedAt).toLocaleString('zh-HK') : '',
-        s.completedAt ? new Date(s.completedAt).toLocaleString('zh-HK') : '',
-      ]),
-      ...notStartedStudents.map(name => [
-        shortenName(name),
-        parseUserForm(name) || '',
-        0, '否', 0, '未點開', '',
-      ]),
+      ...startedStudents.map(s => {
+        // 4. 根據每一題，依序取出這位學生對應的答案
+        const studentAnswers = questions.map(q => {
+          const ans = s.answers ? s.answers[q.id] : undefined;
+          if (ans === undefined || ans === null || ans === '') return '未作答';
+          
+          // 如果是選擇題 (mcq)，原本儲存的是選項 index (如 '0')，我們將它轉成實際的選項文字
+          if (q.type === 'mcq') {
+            const optIdx = parseInt(ans, 10);
+            return q.options[optIdx] !== undefined ? q.options[optIdx] : ans; 
+          }
+          
+          // 填充題直接輸出學生的輸入文字
+          return ans; 
+        });
+
+        return [
+          shortenName(s.name),
+          parseUserForm(s.name) || '',
+          Math.round(s.watchPct || 0),
+          s.completedAt ? '是' : '否',
+          s.answers ? Object.keys(s.answers).length : 0,
+          s.startedAt ? new Date(s.startedAt).toLocaleString('zh-HK') : '',
+          s.completedAt ? new Date(s.completedAt).toLocaleString('zh-HK') : '',
+          ...studentAnswers // 將學生的作答紀錄攤平放入欄位
+        ];
+      }),
+      ...notStartedStudents.map(name => {
+        // 未開始觀看的學生，答案欄位皆留空
+        const emptyAnswers = questions.map(() => '');
+        return [
+          shortenName(name),
+          parseUserForm(name) || '',
+          0,
+          '否',
+          0,
+          '未點開',
+          '',
+          ...emptyAnswers
+        ];
+      }),
     ];
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
