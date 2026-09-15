@@ -341,7 +341,7 @@ function registerUserOnLogin(userName){
   try{const last=localStorage.getItem(ck);if(last&&Date.now()-Number(last)<6*3600*1000)return;}catch{}
   fetch(CONFIG.GOOGLE_SCRIPT_URL,{method:'POST',redirect:'follow',
     headers:{'Content-Type':'text/plain;charset=utf-8'},
-body:JSON.stringify({action:'registerUser',userName,credential:credential||'',
+    body:JSON.stringify({action:'registerUser',userName,
       form:parseUserForm(userName)||'',role:isTeacher(userName)?'teacher':'student',
       loginAt:new Date().toISOString(),device:navigator.userAgent.slice(0,120)})
   }).then(()=>{try{localStorage.setItem(ck,String(Date.now()));}catch{}}).catch(()=>{});

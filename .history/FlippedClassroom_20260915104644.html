@@ -341,7 +341,7 @@ function registerUserOnLogin(userName){
   try{const last=localStorage.getItem(ck);if(last&&Date.now()-Number(last)<6*3600*1000)return;}catch{}
   fetch(CONFIG.GOOGLE_SCRIPT_URL,{method:'POST',redirect:'follow',
     headers:{'Content-Type':'text/plain;charset=utf-8'},
-body:JSON.stringify({action:'registerUser',userName,credential:credential||'',
+    body:JSON.stringify({action:'registerUser',userName,
       form:parseUserForm(userName)||'',role:isTeacher(userName)?'teacher':'student',
       loginAt:new Date().toISOString(),device:navigator.userAgent.slice(0,120)})
   }).then(()=>{try{localStorage.setItem(ck,String(Date.now()));}catch{}}).catch(()=>{});
@@ -485,7 +485,8 @@ function useLessons(){
       const data=await res.json();
       if(data.error)throw new Error(data.error);
       const arr=Array.isArray(data.lessons)?data.lessons.map(normalizeLesson):[];
-const result=arr;      setLessons(result);
+      const result=arr.length?arr:DUMMY_LESSONS.map(normalizeLesson);
+      setLessons(result);
       try{localStorage.setItem(KEY,JSON.stringify({data:result,ts:Date.now()}));}catch{}
     }catch(e){
       if(!readCache()?.data?.length)setLessons(DUMMY_LESSONS.map(normalizeLesson));
@@ -523,7 +524,7 @@ function useRegisteredUsers(userName){
           map[n]=typeof u==='string'?{}:{lastLoginAt:u.lastLoginAt||'',loginCount:Number(u.loginCount||0),form:u.form||''};
         });
         setUsers(names);setUserMap(map);
-}else{setUsers([]);setUserMap({});}
+      }else applyDummy();
     }catch{applyDummy();}
     finally{setLoading(false);}
   },[userName]);
@@ -553,7 +554,7 @@ function useProgressData(userName){
 const scope=isTeacher(userName)?'all':'me';
       const res=await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress&scope=${scope}`
         +`&student=${encodeURIComponent(userName)}&t=${Date.now()}`);      const data=await res.json();
-if(data.error||data.ok===false)throw new Error(data.error||'後端回應失敗');
+      if(data.error)throw new Error(data.error);
       const remote={};
       Object.entries(data.progress||{}).forEach(([lid,m])=>{
         remote[lid]={};Object.entries(m||{}).forEach(([n,r])=>{remote[lid][n]=normalizeRecord(r);});

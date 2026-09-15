@@ -341,7 +341,7 @@ function registerUserOnLogin(userName){
   try{const last=localStorage.getItem(ck);if(last&&Date.now()-Number(last)<6*3600*1000)return;}catch{}
   fetch(CONFIG.GOOGLE_SCRIPT_URL,{method:'POST',redirect:'follow',
     headers:{'Content-Type':'text/plain;charset=utf-8'},
-body:JSON.stringify({action:'registerUser',userName,credential:credential||'',
+    body:JSON.stringify({action:'registerUser',userName,
       form:parseUserForm(userName)||'',role:isTeacher(userName)?'teacher':'student',
       loginAt:new Date().toISOString(),device:navigator.userAgent.slice(0,120)})
   }).then(()=>{try{localStorage.setItem(ck,String(Date.now()));}catch{}}).catch(()=>{});
@@ -553,7 +553,7 @@ function useProgressData(userName){
 const scope=isTeacher(userName)?'all':'me';
       const res=await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?action=getProgress&scope=${scope}`
         +`&student=${encodeURIComponent(userName)}&t=${Date.now()}`);      const data=await res.json();
-if(data.error||data.ok===false)throw new Error(data.error||'後端回應失敗');
+      if(data.error)throw new Error(data.error);
       const remote={};
       Object.entries(data.progress||{}).forEach(([lid,m])=>{
         remote[lid]={};Object.entries(m||{}).forEach(([n,r])=>{remote[lid][n]=normalizeRecord(r);});
