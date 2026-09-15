@@ -335,8 +335,8 @@ window.addEventListener('pagehide',()=>SaveQueue.flush(true));
 window.addEventListener('beforeunload',()=>SaveQueue.flush(true));
 document.addEventListener('visibilitychange',()=>{if(document.hidden)SaveQueue.flush(true);});
 
-function registerUserOnLogin(userName){
-  if(!userName||userName==='訪客 (未登入)'||!isScriptConfigured())return;
+function registerUserOnLogin(userName, credential){
+    if(!userName||userName==='訪客 (未登入)'||!isScriptConfigured())return;
   const ck=CONFIG.STORAGE.registered+userName;
   try{const last=localStorage.getItem(ck);if(last&&Date.now()-Number(last)<6*3600*1000)return;}catch{}
   fetch(CONFIG.GOOGLE_SCRIPT_URL,{method:'POST',redirect:'follow',
